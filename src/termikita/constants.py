@@ -1,5 +1,6 @@
 """App-wide constants for Termikita terminal emulator."""
 
+import sys
 from pathlib import Path
 
 # Application identity
@@ -20,8 +21,14 @@ DEFAULT_FONT_SIZE = 13.0
 # User config directory (~/.config/termikita/)
 CONFIG_DIR = Path.home() / ".config" / "termikita"
 
-# Themes directory (project root /themes/)
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+# Themes directory — resolves correctly both in dev and inside .app bundle
+def _get_themes_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        # Running as .app bundle: executable is MacOS/Termikita, Resources is one level up
+        return Path(sys.executable).parent.parent / "Resources" / "themes"
+    return Path(__file__).parent.parent.parent / "themes"
+
+THEMES_DIR = _get_themes_dir()
 
 # Terminal environment variables advertised to child processes
 DEFAULT_TERM = "xterm-256color"
