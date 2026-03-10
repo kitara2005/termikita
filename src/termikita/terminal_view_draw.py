@@ -20,6 +20,7 @@ from AppKit import (  # type: ignore[import]
 from Foundation import NSMakeRect  # type: ignore[import]
 
 from termikita.color_resolver import resolve_color
+from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
 
 
 class TerminalViewDrawMixin:
@@ -45,13 +46,16 @@ class TerminalViewDrawMixin:
         ).setFill()
         NSBezierPath.fillRect_(rect)
 
-        # Determine which rows intersect with the dirty rect
+        # Determine which rows intersect with the dirty rect (accounting for padding)
+        px, py = TERMINAL_PADDING_X, TERMINAL_PADDING_Y
         lines = self._session.buffer.get_visible_lines()
-        first_row = max(0, int(rect.origin.y / ch))
-        last_row = min(len(lines), int((rect.origin.y + rect.size.height) / ch) + 1)
+        first_row = max(0, int((rect.origin.y - py) / ch))
+        last_row = min(len(lines), int((rect.origin.y - py + rect.size.height) / ch) + 1)
 
         for row_idx in range(first_row, last_row):
-            self._renderer.draw_line(context, row_idx * ch, lines[row_idx], self._theme_colors)
+            self._renderer.draw_line(
+                context, py + row_idx * ch, lines[row_idx], self._theme_colors, x_offset=px
+            )
 
         # Draw cursor only if its row is within the dirty rect
         cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
@@ -64,7 +68,8 @@ class TerminalViewDrawMixin:
                     theme=self._theme_colors,
                 )
                 self._renderer.draw_cursor(
-                    context, cursor_row, cursor_col, "block", cursor_color
+                    context, cursor_row, cursor_col, "block", cursor_color,
+                    x_offset=px, y_offset=py
                 )
 
         if self._selection_start and self._selection_end:
@@ -73,6 +78,7 @@ class TerminalViewDrawMixin:
         if self._marked_text:
             self._renderer.draw_marked_text(
                 context, self._marked_text, cursor_col, cursor_row, self._theme_colors,
+                x_offset=px, y_offset=py,
             )
 
     def _draw_selection_highlight(self, bounds: object) -> None:
@@ -87,16 +93,17 @@ class TerminalViewDrawMixin:
         if (r0, c0) > (r1, c1):
             r0, c0, r1, c1 = r1, c1, r0, c0
 
+        px, py = TERMINAL_PADDING_X, TERMINAL_PADDING_Y
         cw = self._renderer.cell_width
         ch = self._renderer.cell_height
-        max_cols = int(bounds.size.width / cw) if cw > 0 else 0
+        max_cols = int((bounds.size.width - px) / cw) if cw > 0 else 0
 
         for row in range(r0, r1 + 1):
             col_start = c0 if row == r0 else 0
             col_end = c1 if row == r1 else max_cols
             if col_end > col_start:
                 NSBezierPath.fillRect_(
-                    NSMakeRect(col_start * cw, row * ch, (col_end - col_start) * cw, ch)
+                    NSMakeRect(px + col_start * cw, py + row * ch, (col_end - col_start) * cw, ch)
                 )
 
     # ------------------------------------------------------------------
@@ -150,17 +157,16 @@ class TerminalViewDrawMixin:
 
         dirty_rows = session.buffer.get_dirty_rows()
 
+        py = TERMINAL_PADDING_Y
         if dirty_rows is None:
-            # Full redraw needed (scroll, resize, first frame)
             self.setNeedsDisplay_(True)
             session.buffer.clear_dirty()
         elif dirty_rows or cursor_moved:
             for row in dirty_rows:
-                self.setNeedsDisplayInRect_(NSMakeRect(0, row * ch, w, ch))
+                self.setNeedsDisplayInRect_(NSMakeRect(0, py + row * ch, w, ch))
             if cursor_moved and prev:
-                # Erase cursor ghost at old position, draw at new
-                self.setNeedsDisplayInRect_(NSMakeRect(0, prev[0] * ch, w, ch))
-                self.setNeedsDisplayInRect_(NSMakeRect(0, cursor_row * ch, w, ch))
+                self.setNeedsDisplayInRect_(NSMakeRect(0, py + prev[0] * ch, w, ch))
+                self.setNeedsDisplayInRect_(NSMakeRect(0, py + cursor_row * ch, w, ch))
             session.buffer.clear_dirty()
 
     def blinkCursor_(self, timer: object) -> None:
@@ -170,6 +176,7 @@ class TerminalViewDrawMixin:
         if not session:
             return
         cursor_row, cursor_col, _ = session.buffer.get_cursor()
+        px, py = TERMINAL_PADDING_X, TERMINAL_PADDING_Y
         cw = self._renderer.cell_width
         ch = self._renderer.cell_height
-        self.setNeedsDisplayInRect_(NSMakeRect(cursor_col * cw, cursor_row * ch, cw, ch))
+        self.setNeedsDisplayInRect_(NSMakeRect(px + cursor_col * cw, py + cursor_row * ch, cw, ch))

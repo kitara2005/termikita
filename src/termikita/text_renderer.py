@@ -13,7 +13,7 @@ from termikita.buffer_manager import CellData
 from termikita.cell_draw_helpers import draw_backgrounds, draw_glyphs, draw_decorations
 
 # Line-height multiplier applied to raw ascender+descender+leading
-_LINE_HEIGHT_MULT = 1.2
+_LINE_HEIGHT_MULT = 1.35
 # Cursor beam width in points
 _BEAM_WIDTH = 2.0
 # Decoration / cursor underline stroke width in points
@@ -87,13 +87,14 @@ class TextRenderer:
         y: float,
         cells: list[CellData],
         theme_colors: dict,
+        x_offset: float = 0.0,
     ) -> None:
         """Render one row of terminal cells at vertical offset *y*."""
         if not cells:
             return
-        draw_backgrounds(cells, y, self.cell_width, self.cell_height, theme_colors)
-        draw_glyphs(cells, y, self.cell_width, self.baseline_offset, self._fonts, theme_colors)
-        draw_decorations(cells, y, self.cell_width, self.cell_height, self.baseline_offset, theme_colors)
+        draw_backgrounds(cells, y, self.cell_width, self.cell_height, theme_colors, x_offset)
+        draw_glyphs(cells, y, self.cell_width, self.baseline_offset, self._fonts, theme_colors, x_offset)
+        draw_decorations(cells, y, self.cell_width, self.cell_height, self.baseline_offset, theme_colors, x_offset)
 
     def draw_cursor(
         self,
@@ -102,25 +103,23 @@ class TextRenderer:
         col: int,
         style: str,
         color: object,
+        x_offset: float = 0.0,
+        y_offset: float = 0.0,
     ) -> None:
-        """Draw terminal cursor at grid position (row, col).
-
-        style: "block" | "beam" | "underline"
-        color: NSColor resolved by caller from theme["cursor"]
-        """
+        """Draw terminal cursor at grid position (row, col)."""
         try:
             from AppKit import NSBezierPath  # type: ignore[import]
             import AppKit  # type: ignore[import]
 
-            x     = col * self.cell_width
-            row_y = row * self.cell_height
+            x     = x_offset + col * self.cell_width
+            row_y = y_offset + row * self.cell_height
             color.set()
 
             if style == "beam":
                 NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, _BEAM_WIDTH, self.cell_height))
             elif style == "underline":
                 NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, self.cell_width, _DECO_WIDTH))
-            else:  # block (default)
+            else:
                 NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, self.cell_width, self.cell_height))
         except Exception:
             pass
@@ -132,6 +131,8 @@ class TextRenderer:
         cursor_col: int,
         cursor_row: int,
         theme_colors: dict,
+        x_offset: float = 0.0,
+        y_offset: float = 0.0,
     ) -> None:
         """Render IME composing text with underline highlight at cursor position."""
         if not text:
@@ -140,8 +141,8 @@ class TextRenderer:
             from AppKit import NSAttributedString, NSUnderlineStyleAttributeName  # type: ignore[import]
             import AppKit  # type: ignore[import]
 
-            x    = cursor_col * self.cell_width
-            pt_y = cursor_row * self.cell_height + self.baseline_offset
+            x    = x_offset + cursor_col * self.cell_width
+            pt_y = y_offset + cursor_row * self.cell_height + self.baseline_offset
             fg   = resolve_color("default", is_fg=True, theme=theme_colors)
             font = self._fonts.get((False, False))
             attrs: dict = {AppKit.NSForegroundColorAttributeName: fg, NSUnderlineStyleAttributeName: 1}

@@ -23,7 +23,7 @@ from termikita.text_renderer import TextRenderer
 from termikita.terminal_view_draw import TerminalViewDrawMixin
 from termikita.terminal_view_input import TerminalViewInputMixin
 from termikita.input_handler import KEY_MAP
-from termikita.constants import DEFAULT_COLS, DEFAULT_ROWS
+from termikita.constants import DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_PADDING_X, TERMINAL_PADDING_Y
 
 # Default theme — Phase 07 will load from JSON
 DEFAULT_THEME: dict = {
@@ -77,8 +77,10 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
     def _init_session(self) -> None:
         cw, ch = self._renderer.get_cell_dimensions()
         bounds = self.bounds()
-        cols = max(1, int(bounds.size.width / cw)) if cw > 0 else DEFAULT_COLS
-        rows = max(1, int(bounds.size.height / ch)) if ch > 0 else DEFAULT_ROWS
+        usable_w = bounds.size.width - TERMINAL_PADDING_X * 2
+        usable_h = bounds.size.height - TERMINAL_PADDING_Y * 2
+        cols = max(1, int(usable_w / cw)) if cw > 0 else DEFAULT_COLS
+        rows = max(1, int(usable_h / ch)) if ch > 0 else DEFAULT_ROWS
         self._session = TerminalSession(cols=cols, rows=rows)
 
     # ------------------------------------------------------------------
@@ -101,8 +103,8 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         cw, ch = self._renderer.get_cell_dimensions()
         if cw <= 0 or ch <= 0:
             return
-        new_cols = max(1, int(newSize.width / cw))
-        new_rows = max(1, int(newSize.height / ch))
+        new_cols = max(1, int((newSize.width - TERMINAL_PADDING_X * 2) / cw))
+        new_rows = max(1, int((newSize.height - TERMINAL_PADDING_Y * 2) / ch))
         if hasattr(self, "_session") and self._session:
             self._session.resize(new_cols, new_rows)
         self._back_buffer = None

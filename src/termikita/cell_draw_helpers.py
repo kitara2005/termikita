@@ -49,6 +49,7 @@ def draw_backgrounds(
     cell_w: float,
     cell_h: float,
     theme: dict,
+    x_offset: float = 0.0,
 ) -> None:
     """Pass 1: fill background rectangles, batching adjacent same-color cells."""
     try:
@@ -62,7 +63,7 @@ def draw_backgrounds(
             if run_color is not None:
                 run_color.set()
                 rect = AppKit.NSMakeRect(
-                    run_start * cell_w, y,
+                    x_offset + run_start * cell_w, y,
                     (end - run_start) * cell_w, cell_h,
                 )
                 NSBezierPath.fillRect_(rect)
@@ -88,6 +89,7 @@ def draw_glyphs(
     baseline: float,
     fonts: dict[tuple[bool, bool], object],
     theme: dict,
+    x_offset: float = 0.0,
 ) -> None:
     """Pass 2: draw text glyphs at exact grid positions with cached attr strings.
 
@@ -136,7 +138,7 @@ def draw_glyphs(
                     _GLYPH_CACHE.clear()
                 _GLYPH_CACHE[cache_key] = attr_str
 
-            attr_str.drawAtPoint_(AppKit.NSMakePoint(i * cell_w, y + baseline))
+            attr_str.drawAtPoint_(AppKit.NSMakePoint(x_offset + i * cell_w, y + baseline))
     except Exception:
         pass
 
@@ -148,6 +150,7 @@ def draw_decorations(
     cell_h: float,
     baseline: float,
     theme: dict,
+    x_offset: float = 0.0,
 ) -> None:
     """Pass 3: underline and strikethrough rendered as NSBezierPath strokes."""
     try:
@@ -159,7 +162,7 @@ def draw_decorations(
                 continue
             fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
             fg.set()
-            x = i * cell_w
+            x = x_offset + i * cell_w
             if cell.underline:
                 ul_y = y + baseline - _DECO_WIDTH
                 path = NSBezierPath.bezierPath()

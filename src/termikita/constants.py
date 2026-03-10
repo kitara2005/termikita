@@ -15,8 +15,12 @@ DEFAULT_ROWS = 24
 DEFAULT_SCROLLBACK = 100_000
 
 # Font defaults
-DEFAULT_FONT_FAMILY = "SF Mono"
+DEFAULT_FONT_FAMILY = "Menlo"
 DEFAULT_FONT_SIZE = 13.0
+
+# Terminal padding (points) — breathing room between text and view edges
+TERMINAL_PADDING_X = 12.0
+TERMINAL_PADDING_Y = 8.0
 
 # User config directory (~/.config/termikita/)
 CONFIG_DIR = Path.home() / ".config" / "termikita"
