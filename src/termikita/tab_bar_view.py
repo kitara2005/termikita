@@ -15,6 +15,8 @@ from AppKit import (  # type: ignore[import]
     NSFont,
     NSBezierPath,
     NSString,
+    NSMenu,
+    NSMenuItem,
     NSMutableParagraphStyle,
     NSLineBreakByTruncatingTail,
     NSForegroundColorAttributeName,
@@ -62,6 +64,8 @@ class TabBarView(NSView):
         self._controller = None
         self._hover_tab_index = -1
         self._hover_close = False
+        self._pending_close_idx = -1
+        self._context_menu_tab_index = -1
         # Tracking area added in viewDidMoveToWindow_ / updateTrackingAreas
         return self
 
@@ -209,9 +213,22 @@ class TabBarView(NSView):
         if tab_idx < 0:
             return
         if on_close:
-            self._controller.close_tab(tab_idx)
+            # Defer close to next run loop iteration — calling close_tab
+            # synchronously from mouseDown_ can deallocate this view while
+            # the event handler is still on the call stack, causing a crash.
+            self._pending_close_idx = tab_idx
+            self.performSelector_withObject_afterDelay_(
+                "deferredCloseTab:", None, 0.0
+            )
         else:
             self._controller.select_tab(tab_idx)
+
+    def deferredCloseTab_(self, sender: object) -> None:
+        """Timer callback — close the tab that was queued by mouseDown_."""
+        idx = getattr(self, "_pending_close_idx", -1)
+        if idx >= 0 and self._controller is not None:
+            self._controller.close_tab(idx)
+        self._pending_close_idx = -1
 
     def mouseMoved_(self, event: object) -> None:
         """Update hover state for close button highlight."""
@@ -230,6 +247,62 @@ class TabBarView(NSView):
             self._hover_tab_index = -1
             self._hover_close = False
             self.setNeedsDisplay_(True)
+
+    # ------------------------------------------------------------------
+    # Context menu (right-click on tab)
+    # ------------------------------------------------------------------
+
+    def menuForEvent_(self, event: object) -> object:
+        """Build context menu for right-clicked tab."""
+        if self._controller is None:
+            return None
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        tab_idx, _ = self._hit_test(loc)
+        if tab_idx < 0:
+            return None
+        self._context_menu_tab_index = tab_idx
+
+        menu = NSMenu.alloc().init()
+        menu.setAutoenablesItems_(False)
+
+        new_tab = menu.addItemWithTitle_action_keyEquivalent_("New Tab", "contextNewTab:", "")
+        new_tab.setTarget_(self)
+
+        close_tab = menu.addItemWithTitle_action_keyEquivalent_("Close Tab", "contextCloseTab:", "")
+        close_tab.setTarget_(self)
+
+        close_others = menu.addItemWithTitle_action_keyEquivalent_("Close Other Tabs", "contextCloseOtherTabs:", "")
+        close_others.setTarget_(self)
+        close_others.setEnabled_(len(self._controller.tabs) > 1)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        dup_tab = menu.addItemWithTitle_action_keyEquivalent_("Duplicate Tab", "contextDuplicateTab:", "")
+        dup_tab.setTarget_(self)
+
+        return menu
+
+    def contextNewTab_(self, sender: object) -> None:
+        if self._controller:
+            self._controller.add_tab()
+
+    def contextCloseTab_(self, sender: object) -> None:
+        """Close the right-clicked tab (deferred to avoid crash)."""
+        if self._controller:
+            idx = self._context_menu_tab_index
+            if 0 <= idx < len(self._controller.tabs):
+                self._pending_close_idx = idx
+                self.performSelector_withObject_afterDelay_("deferredCloseTab:", None, 0.0)
+
+    def contextCloseOtherTabs_(self, sender: object) -> None:
+        if self._controller:
+            idx = self._context_menu_tab_index
+            if 0 <= idx < len(self._controller.tabs):
+                self._controller.close_other_tabs(idx)
+
+    def contextDuplicateTab_(self, sender: object) -> None:
+        if self._controller:
+            self._controller.add_tab()
 
     # ------------------------------------------------------------------
     # Geometry helpers

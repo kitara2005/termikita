@@ -110,6 +110,7 @@ class PTYManager:
     def shutdown(self) -> None:
         """Kill the child process, close the master fd, and stop the read thread.
 
+        Correct order: kill process → stop reader → close fd.
         Safe to call multiple times.
         """
         if not self._running and self._master_fd is None:
@@ -117,33 +118,49 @@ class PTYManager:
 
         self._running = False
 
-        # Close fd first — causes the blocking os.read() in _read_loop to raise
-        # OSError, which breaks the thread out of its loop cleanly.
-        if self._master_fd is not None:
+        # Snapshot and clear pid to prevent race with _handle_child_exit
+        child_pid = self._child_pid
+        self._child_pid = None
+        master_fd = self._master_fd
+        self._master_fd = None
+
+        # Step 1: Kill child process — causes slave PTY to close,
+        # which makes master fd return EOF so reader thread can exit.
+        if child_pid is not None:
             try:
-                os.close(self._master_fd)
+                os.kill(child_pid, signal.SIGHUP)
+            except ProcessLookupError:
+                child_pid = None
+
+        # Step 2: Close master fd — unblocks reader thread if child
+        # hasn't exited yet (reader gets OSError and breaks).
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
             except OSError:
                 pass
-            self._master_fd = None
 
-        # Send SIGHUP (terminal hang-up) to the child shell.
-        if self._child_pid is not None:
-            try:
-                os.kill(self._child_pid, signal.SIGHUP)
-            except ProcessLookupError:
-                pass  # Child already exited
-
-            # Reap the child to avoid zombies; SIGKILL if it ignores SIGHUP.
-            try:
-                _, _ = os.waitpid(self._child_pid, 0)
-            except ChildProcessError:
-                pass
-            self._child_pid = None
-
-        # Wait for the read thread to finish (it will see _running=False + OSError).
+        # Step 3: Stop reader thread (should exit quickly now).
         if self._read_thread is not None and self._read_thread.is_alive():
             self._read_thread.join(timeout=2.0)
             self._read_thread = None
+
+        # Step 4: Reap child process (non-blocking with SIGKILL fallback).
+        if child_pid is not None:
+            import time
+            for _ in range(5):
+                try:
+                    pid, _ = os.waitpid(child_pid, os.WNOHANG)
+                    if pid != 0:
+                        return
+                except ChildProcessError:
+                    return
+                time.sleep(0.05)
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+                os.waitpid(child_pid, 0)
+            except (ProcessLookupError, ChildProcessError):
+                pass
 
     @property
     def is_alive(self) -> bool:
@@ -201,12 +218,15 @@ class PTYManager:
         Exits when the master fd is closed (OSError) or _running is False.
         """
         while self._running:
+            fd = self._master_fd
+            if fd is None:
+                break
             try:
-                data = os.read(self._master_fd, 4096)
+                data = os.read(fd, 4096)
                 if not data:
                     break
                 self._on_output(data)
-            except OSError:
+            except (OSError, TypeError):
                 # fd closed (shutdown) or child exited — both are normal exits.
                 break
 

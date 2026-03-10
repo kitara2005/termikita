@@ -9,6 +9,11 @@ Imported as a mixin by terminal_view.py. Provides:
 
 from __future__ import annotations
 
+from AppKit import (  # type: ignore[import]
+    NSMenu,
+    NSMenuItem,
+    NSApp,
+)
 from Foundation import NSNotFound, NSMakeRange  # type: ignore[import]
 
 
@@ -169,3 +174,58 @@ class TerminalViewInputMixin:
         last_col = len(lines[last_row]) if lines[last_row] else 0
         self._selection_end = (last_row, last_col)
         self.setNeedsDisplay_(True)
+
+    # ------------------------------------------------------------------
+    # Context menu (right-click)
+    # ------------------------------------------------------------------
+
+    def menuForEvent_(self, event: object) -> object:
+        """Build and return context menu for right-click on terminal area."""
+        menu = NSMenu.alloc().init()
+        menu.setAutoenablesItems_(False)
+
+        # Copy — disabled when no selection
+        copy_item = menu.addItemWithTitle_action_keyEquivalent_("Copy", "contextCopy:", "")
+        copy_item.setTarget_(self)
+        has_selection = bool(self._selection_start and self._selection_end)
+        copy_item.setEnabled_(has_selection)
+
+        # Paste
+        paste_item = menu.addItemWithTitle_action_keyEquivalent_("Paste", "contextPaste:", "")
+        paste_item.setTarget_(self)
+
+        # Select All
+        sel_all_item = menu.addItemWithTitle_action_keyEquivalent_("Select All", "contextSelectAll:", "")
+        sel_all_item.setTarget_(self)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # Clear Buffer
+        clear_item = menu.addItemWithTitle_action_keyEquivalent_("Clear Buffer", "contextClearBuffer:", "")
+        clear_item.setTarget_(self)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # New Tab / Close Tab — target the app delegate
+        delegate = NSApp.delegate()
+        new_tab = menu.addItemWithTitle_action_keyEquivalent_("New Tab", "newTab:", "")
+        new_tab.setTarget_(delegate)
+
+        close_tab = menu.addItemWithTitle_action_keyEquivalent_("Close Tab", "closeTab:", "")
+        close_tab.setTarget_(delegate)
+
+        return menu
+
+    def contextCopy_(self, sender: object) -> None:
+        self._copy_selection()
+
+    def contextPaste_(self, sender: object) -> None:
+        self._paste_clipboard()
+
+    def contextSelectAll_(self, sender: object) -> None:
+        self._select_all()
+
+    def contextClearBuffer_(self, sender: object) -> None:
+        """Send VT100 erase-screen + cursor-home to clear terminal buffer."""
+        if self._session:
+            self._session.write(b"\x1b[2J\x1b[H")

@@ -96,8 +96,11 @@ class TabController:
             on_exit=self._on_tab_exit,
         )
 
+        from AppKit import NSViewWidthSizable, NSViewHeightSizable  # type: ignore[import]
+
         bounds = self._content_view.bounds()
         view = TerminalView.alloc().initWithFrame_(bounds)
+        view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
         # initWithFrame_ auto-creates an internal session; replace it with ours
         # so the controller owns session lifetime.
@@ -122,11 +125,16 @@ class TabController:
 
         tab = self.tabs[index]
         _stop_view_timers(tab.view)
-        tab.session.shutdown()
+        try:
+            tab.session.shutdown()
+        except Exception:
+            pass
+        tab.view._session = None
         tab.view.removeFromSuperview()
         self.tabs.pop(index)
 
         if not self.tabs:
+            # Last tab closed — quit the app.
             try:
                 from AppKit import NSApp  # type: ignore[import]
                 NSApp.terminate_(None)
@@ -175,6 +183,25 @@ class TabController:
         if 0 <= self.active_tab_index < len(self.tabs):
             return self.tabs[self.active_tab_index].view
         return None
+
+    def close_other_tabs(self, keep_index: int) -> None:
+        """Close all tabs except the one at keep_index. Single select_tab at end."""
+        if keep_index < 0 or keep_index >= len(self.tabs):
+            return
+        kept_tab = self.tabs[keep_index]
+        # Teardown all other tabs without triggering select_tab each time
+        for i, tab in enumerate(self.tabs):
+            if i != keep_index:
+                _stop_view_timers(tab.view)
+                try:
+                    tab.session.shutdown()
+                except Exception:
+                    pass
+                tab.view._session = None
+                tab.view.removeFromSuperview()
+        self.tabs = [kept_tab]
+        self.active_tab_index = -1
+        self.select_tab(0)
 
     def set_theme(self, theme_colors: dict) -> None:
         """Push a new theme to all existing tabs."""

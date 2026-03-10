@@ -9,6 +9,8 @@ on the current AppKit graphics context. Each helper handles one rendering pass:
 
 from __future__ import annotations
 
+import unicodedata
+
 from termikita.buffer_manager import CellData
 from termikita.color_resolver import resolve_cell_colors
 
@@ -54,6 +56,13 @@ def draw_backgrounds(
         pass
 
 
+def _is_wide_char(ch: str) -> bool:
+    """Check if character is double-width (CJK, emoji, fullwidth)."""
+    if not ch or len(ch) != 1:
+        return False
+    return unicodedata.east_asian_width(ch) in ("W", "F")
+
+
 def draw_glyphs(
     cells: list[CellData],
     y: float,
@@ -62,15 +71,26 @@ def draw_glyphs(
     fonts: dict[tuple[bool, bool], object],
     theme: dict,
 ) -> None:
-    """Pass 2: draw text glyphs using NSAttributedString.drawAtPoint_."""
+    """Pass 2: draw text glyphs using NSAttributedString.drawAtPoint_.
+
+    Wide characters (CJK, emoji) are detected via east_asian_width and
+    the shadow cell at position i+1 is skipped to avoid double rendering.
+    """
     try:
         from AppKit import NSAttributedString  # type: ignore[import]
         import AppKit  # type: ignore[import]
 
+        skip_next = False
         for i, cell in enumerate(cells):
+            if skip_next:
+                skip_next = False
+                continue
             ch = cell.char
             if not ch or ch == " ":
                 continue
+            # Wide char detection — skip the pyte shadow cell at i+1
+            if _is_wide_char(ch):
+                skip_next = True
             font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
             fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
             attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}

@@ -110,6 +110,7 @@ class BufferManager:
         self._scroll_offset: int = 0
         self._synchronized: bool = False       # DEC 2026 batch mode
         self._osc8_current_url: str | None = None
+        self._force_full_redraw: bool = True   # first frame needs full draw
 
     # ------------------------------------------------------------------
     # Feed raw PTY bytes
@@ -177,23 +178,33 @@ class BufferManager:
     # ------------------------------------------------------------------
     # Dirty tracking
     # ------------------------------------------------------------------
+    def get_dirty_rows(self) -> set[int] | None:
+        """Dirty row indices, or None when full redraw needed (scroll/resize)."""
+        if self._force_full_redraw:
+            return None
+        return set(self._screen.dirty)
+
     def get_dirty_lines(self) -> set[int]:
         return set(self._screen.dirty)
 
     def clear_dirty(self) -> None:
         self._screen.dirty.clear()
+        self._force_full_redraw = False
 
     # ------------------------------------------------------------------
     # User scroll controls
     # ------------------------------------------------------------------
     def scroll_up(self, lines: int = 3) -> None:
         self._scroll_offset = min(self._scroll_offset + lines, len(self._scrollback))
+        self._force_full_redraw = True
 
     def scroll_down(self, lines: int = 3) -> None:
         self._scroll_offset = max(0, self._scroll_offset - lines)
+        self._force_full_redraw = True
 
     def scroll_to_bottom(self) -> None:
         self._scroll_offset = 0
+        self._force_full_redraw = True
 
     # ------------------------------------------------------------------
     # Resize
@@ -202,13 +213,19 @@ class BufferManager:
         """Resize grid. No reflow in v1 — scroll_offset resets to bottom."""
         self._screen.resize(rows, cols)
         self._scroll_offset = 0
+        self._force_full_redraw = True
 
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
     @property
     def dirty(self) -> bool:
-        return bool(self._screen.dirty)
+        return bool(self._screen.dirty) or self._force_full_redraw
+
+    @property
+    def is_at_bottom(self) -> bool:
+        """True when viewport is at the latest output (not scrolled back)."""
+        return self._scroll_offset == 0
 
     @property
     def synchronized(self) -> bool:

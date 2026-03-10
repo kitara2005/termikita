@@ -4,19 +4,25 @@ Composes three mixins:
 - TerminalViewDrawMixin  — drawRect_, selection highlight, scroll, timers
 - TerminalViewInputMixin — NSTextInputClient, mouse selection, clipboard
 
+PyObjC only registers methods as ObjC selectors if they exist directly on the
+class (not inherited from plain Python mixins). Every method that the ObjC
+runtime must discover (drawRect_, NSTextInputClient protocol, mouse/scroll,
+timer callbacks) is forwarded explicitly below.
+
 Drawing uses isFlipped=True (top-left origin) so row 0 is at y=0.
 """
 
 from __future__ import annotations
 
 import objc  # type: ignore[import]
-from AppKit import NSView, NSEventModifierFlagCommand  # type: ignore[import]
+from AppKit import NSView, NSEventModifierFlagCommand, NSEventModifierFlagControl  # type: ignore[import]
 from Foundation import NSNotFound  # type: ignore[import]
 
 from termikita.terminal_session import TerminalSession
 from termikita.text_renderer import TextRenderer
 from termikita.terminal_view_draw import TerminalViewDrawMixin
 from termikita.terminal_view_input import TerminalViewInputMixin
+from termikita.input_handler import KEY_MAP
 from termikita.constants import DEFAULT_COLS, DEFAULT_ROWS
 
 # Default theme — Phase 07 will load from JSON
@@ -53,18 +59,18 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
     def _init_state(self) -> None:
         self._renderer = TextRenderer()
         self._theme_colors = DEFAULT_THEME
-        # NSTextInputClient state
         self._marked_text: str | None = None
         self._marked_range: tuple[int, int] = (NSNotFound, 0)
         self._selected_range: tuple[int, int] = (0, 0)
-        # Selection state
         self._selection_start: tuple[int, int] | None = None
         self._selection_end: tuple[int, int] | None = None
-        # Cursor blink
         self._cursor_visible: bool = True
         self._cursor_blink_timer: object = None
         self._refresh_timer: object = None
         self._back_buffer: object = None
+        self._prev_cursor_pos: tuple[int, int] | None = None
+        # Layer-backed view enables GPU compositing for smoother drawing
+        self.setWantsLayer_(True)
 
     def _init_session(self) -> None:
         cw, ch = self._renderer.get_cell_dimensions()
@@ -78,7 +84,6 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
     # ------------------------------------------------------------------
 
     def isFlipped(self) -> bool:
-        """Top-left origin — row 0 at y=0, rows increase downward."""
         return True
 
     def acceptsFirstResponder(self) -> bool:
@@ -102,19 +107,127 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
+    # PyObjC forwarding: drawing + timers (from TerminalViewDrawMixin)
+    # ------------------------------------------------------------------
+
+    def drawRect_(self, rect: object) -> None:
+        TerminalViewDrawMixin.drawRect_(self, rect)
+
+    def scrollWheel_(self, event: object) -> None:
+        TerminalViewDrawMixin.scrollWheel_(self, event)
+
+    def refreshDisplay_(self, timer: object) -> None:
+        TerminalViewDrawMixin.refreshDisplay_(self, timer)
+
+    def blinkCursor_(self, timer: object) -> None:
+        TerminalViewDrawMixin.blinkCursor_(self, timer)
+
+    # ------------------------------------------------------------------
+    # PyObjC forwarding: NSTextInputClient (from TerminalViewInputMixin)
+    # ------------------------------------------------------------------
+
+    def insertText_replacementRange_(self, string: object, rng: object) -> None:
+        TerminalViewInputMixin.insertText_replacementRange_(self, string, rng)
+
+    def setMarkedText_selectedRange_replacementRange_(
+        self, string: object, selRange: object, replRange: object
+    ) -> None:
+        TerminalViewInputMixin.setMarkedText_selectedRange_replacementRange_(
+            self, string, selRange, replRange
+        )
+
+    def unmarkText(self) -> None:
+        TerminalViewInputMixin.unmarkText(self)
+
+    def hasMarkedText(self) -> bool:
+        return TerminalViewInputMixin.hasMarkedText(self)
+
+    def markedRange(self) -> object:
+        return TerminalViewInputMixin.markedRange(self)
+
+    def selectedRange(self) -> object:
+        return TerminalViewInputMixin.selectedRange(self)
+
+    def firstRectForCharacterRange_actualRange_(self, range_: object, actual: object) -> object:
+        return TerminalViewInputMixin.firstRectForCharacterRange_actualRange_(
+            self, range_, actual
+        )
+
+    def attributedSubstringForProposedRange_actualRange_(
+        self, range_: object, actual: object
+    ) -> None:
+        return None
+
+    def characterIndexForPoint_(self, point: object) -> int:
+        return 0
+
+    def validAttributesForMarkedText(self) -> list:
+        return []
+
+    # ------------------------------------------------------------------
+    # PyObjC forwarding: mouse events (from TerminalViewInputMixin)
+    # ------------------------------------------------------------------
+
+    def mouseDown_(self, event: object) -> None:
+        TerminalViewInputMixin.mouseDown_(self, event)
+
+    def mouseDragged_(self, event: object) -> None:
+        TerminalViewInputMixin.mouseDragged_(self, event)
+
+    def mouseUp_(self, event: object) -> None:
+        TerminalViewInputMixin.mouseUp_(self, event)
+
+    # ------------------------------------------------------------------
+    # PyObjC forwarding: context menu (from TerminalViewInputMixin)
+    # ------------------------------------------------------------------
+
+    def menuForEvent_(self, event: object) -> object:
+        return TerminalViewInputMixin.menuForEvent_(self, event)
+
+    def contextCopy_(self, sender: object) -> None:
+        TerminalViewInputMixin.contextCopy_(self, sender)
+
+    def contextPaste_(self, sender: object) -> None:
+        TerminalViewInputMixin.contextPaste_(self, sender)
+
+    def contextSelectAll_(self, sender: object) -> None:
+        TerminalViewInputMixin.contextSelectAll_(self, sender)
+
+    def contextClearBuffer_(self, sender: object) -> None:
+        TerminalViewInputMixin.contextClearBuffer_(self, sender)
+
+    # ------------------------------------------------------------------
     # Keyboard input
     # ------------------------------------------------------------------
 
     def keyDown_(self, event: object) -> None:
-        if event.modifierFlags() & NSEventModifierFlagCommand:
+        modifiers = event.modifierFlags()
+        if modifiers & NSEventModifierFlagCommand:
             self._handle_cmd_shortcut(event)
             return
-        # Route through Text Input System for IME (Vietnamese, CJK, etc.)
-        self.interpretKeyEvents_([event])
+        # Ctrl+letter → control character (0x01-0x1A)
+        if modifiers & NSEventModifierFlagControl:
+            chars = event.characters()
+            if chars and len(chars) == 1:
+                ch = chars[0].lower()
+                if "a" <= ch <= "z":
+                    self._session.write(bytes([ord(ch) - ord("a") + 1]))
+                    return
+        # Special keys (Return, Tab, Backspace, arrows, etc.) → write directly
+        keycode = event.keyCode()
+        if keycode in KEY_MAP:
+            self._session.write(KEY_MAP[keycode])
+            return
+        # Regular character input → send UTF-8 bytes to PTY
+        chars = event.characters()
+        if chars:
+            try:
+                self._session.write(chars.encode("utf-8"))
+            except (UnicodeEncodeError, AttributeError):
+                pass
 
     def doCommandBySelector_(self, selector: object) -> None:
-        """Called by interpretKeyEvents_ for keys not consumed by IME."""
-        pass  # Special keys handled via insertText_ path in the mixin
+        pass
 
     def _handle_cmd_shortcut(self, event: object) -> None:
         chars = event.charactersIgnoringModifiers()
@@ -125,23 +238,26 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
             if self._selection_start and self._selection_end:
                 self._copy_selection()
             else:
-                self._session.write(b"\x03")  # Ctrl+C / SIGINT
+                self._session.write(b"\x03")
         elif key == "v":
             self._paste_clipboard()
         elif key == "a":
             self._select_all()
         elif key == "k":
-            self._session.write(b"\x0c")  # Ctrl+L clear screen
+            self._session.write(b"\x0c")
 
     # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 
     def dealloc(self) -> None:
-        if self._refresh_timer:
-            self._refresh_timer.invalidate()
-        if self._cursor_blink_timer:
-            self._cursor_blink_timer.invalidate()
-        if hasattr(self, "_session") and self._session:
-            self._session.shutdown()
+        try:
+            if getattr(self, "_refresh_timer", None):
+                self._refresh_timer.invalidate()
+            if getattr(self, "_cursor_blink_timer", None):
+                self._cursor_blink_timer.invalidate()
+            if getattr(self, "_session", None):
+                self._session.shutdown()
+        except Exception:
+            pass
         objc.super(TerminalView, self).dealloc()

@@ -49,8 +49,9 @@ class AppDelegate(NSObject):
         # --- Menu bar ---
         self._setup_menu_bar()
 
-        # --- Show window ---
+        # --- Show window & activate app ---
         self._main_window.show()
+        NSApp.activateIgnoringOtherApps_(True)
 
     def applicationShouldTerminateAfterLastWindowClosed_(self, app: object) -> bool:
         """Quit the app when the last window is closed."""

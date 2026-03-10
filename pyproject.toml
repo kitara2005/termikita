@@ -1,6 +1,6 @@
 [project]
 name = "termikita"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native macOS terminal emulator with full Unicode/Vietnamese support"
 requires-python = ">=3.12"
 
@@ -24,6 +24,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = ["slow: live PTY tests that spawn a real shell (may take 10+ seconds)"]
 
 [tool.ruff]
 line-length = 100
