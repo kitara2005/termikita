@@ -2,9 +2,13 @@
 
 These functions are called by TextRenderer.draw_line() and operate directly
 on the current AppKit graphics context. Each helper handles one rendering pass:
-  - _draw_backgrounds : Pass 1 — background fill rectangles (batched by color)
-  - _draw_glyphs      : Pass 2 — foreground text via NSAttributedString
-  - _draw_decorations : Pass 3 — underline / strikethrough via NSBezierPath
+  - draw_backgrounds  : Pass 1 — background fill rectangles (batched by color)
+  - draw_glyphs       : Pass 2 — foreground text (batched NSMutableAttributedString)
+  - draw_decorations  : Pass 3 — underline / strikethrough via NSBezierPath
+
+Performance: draw_glyphs builds ONE attributed string per row with attribute
+ranges, then issues a single drawAtPoint_ call. This reduces ObjC bridge
+overhead from ~80 calls/row to ~10 calls/row.
 """
 
 from __future__ import annotations
@@ -16,6 +20,16 @@ from termikita.color_resolver import resolve_cell_colors
 
 # Decoration line stroke width (points)
 _DECO_WIDTH = 1.0
+
+
+def _is_wide_char(ch: str) -> bool:
+    """Check if character is double-width (CJK, emoji, fullwidth).
+
+    Only checks single codepoints — matches pyte's per-cell buffer model.
+    """
+    if not ch or len(ch) != 1:
+        return False
+    return unicodedata.east_asian_width(ch) in ("W", "F")
 
 
 def draw_backgrounds(
@@ -56,13 +70,6 @@ def draw_backgrounds(
         pass
 
 
-def _is_wide_char(ch: str) -> bool:
-    """Check if character is double-width (CJK, emoji, fullwidth)."""
-    if not ch or len(ch) != 1:
-        return False
-    return unicodedata.east_asian_width(ch) in ("W", "F")
-
-
 def draw_glyphs(
     cells: list[CellData],
     y: float,
@@ -71,11 +78,69 @@ def draw_glyphs(
     fonts: dict[tuple[bool, bool], object],
     theme: dict,
 ) -> None:
-    """Pass 2: draw text glyphs using NSAttributedString.drawAtPoint_.
+    """Pass 2: draw row text as a single NSMutableAttributedString.
 
-    Wide characters (CJK, emoji) are detected via east_asian_width and
-    the shadow cell at position i+1 is skipped to avoid double rendering.
+    Fast path: builds one attributed string for the row with attribute ranges,
+    then draws with a single drawAtPoint_ call. Falls back to per-cell for
+    rows containing wide chars (emoji/CJK) where font fallback may shift advances.
     """
+    has_wide = any(_is_wide_char(c.char) for c in cells if c.char)
+    if has_wide:
+        _draw_glyphs_percell(cells, y, cell_w, baseline, fonts, theme)
+    else:
+        _draw_glyphs_batched(cells, y, cell_w, baseline, fonts, theme)
+
+
+def _draw_glyphs_batched(
+    cells: list[CellData], y: float, cell_w: float,
+    baseline: float, fonts: dict, theme: dict,
+) -> None:
+    """Fast path: one NSMutableAttributedString per row, one draw call."""
+    try:
+        from AppKit import NSMutableAttributedString  # type: ignore[import]
+        import AppKit  # type: ignore[import]
+        from Foundation import NSMakeRange  # type: ignore[import]
+
+        # Build row text (spaces for empty cells to maintain cell positioning)
+        row_text = "".join(c.char if c.char else " " for c in cells)
+        if not row_text.strip():
+            return
+
+        ns_str = AppKit.NSString.stringWithString_(row_text)
+        attr_str = NSMutableAttributedString.alloc().initWithString_(ns_str)
+
+        # Apply attributes in contiguous runs (same bold/italic/fg/bg/reverse)
+        i, n = 0, len(cells)
+        while i < n:
+            cell = cells[i]
+            key = (cell.bold, cell.italic, cell.fg, cell.bg, cell.reverse)
+            # Find end of same-attribute run
+            j = i + 1
+            while j < n:
+                c2 = cells[j]
+                if (c2.bold, c2.italic, c2.fg, c2.bg, c2.reverse) != key:
+                    break
+                j += 1
+            # Resolve color and font once per run
+            fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
+            font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
+            attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}
+            if font:
+                attrs[AppKit.NSFontAttributeName] = font
+            attr_str.setAttributes_range_(attrs, NSMakeRange(i, j - i))
+            i = j
+
+        # Single draw call for entire row
+        attr_str.drawAtPoint_(AppKit.NSMakePoint(0, y + baseline))
+    except Exception:
+        pass
+
+
+def _draw_glyphs_percell(
+    cells: list[CellData], y: float, cell_w: float,
+    baseline: float, fonts: dict, theme: dict,
+) -> None:
+    """Slow path: per-cell drawing for rows with wide chars (emoji/CJK)."""
     try:
         from AppKit import NSAttributedString  # type: ignore[import]
         import AppKit  # type: ignore[import]
@@ -88,7 +153,6 @@ def draw_glyphs(
             ch = cell.char
             if not ch or ch == " ":
                 continue
-            # Wide char detection — skip the pyte shadow cell at i+1
             if _is_wide_char(ch):
                 skip_next = True
             font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
@@ -130,7 +194,6 @@ def draw_decorations(
                 path.lineToPoint_(AppKit.NSMakePoint(x + cell_w, ul_y))
                 path.stroke()
             if cell.strikethrough:
-                # Strikethrough sits at ~35% above the baseline in the ascender zone
                 st_y = y + baseline + (cell_h - baseline) * 0.35
                 path = NSBezierPath.bezierPath()
                 path.setLineWidth_(_DECO_WIDTH)

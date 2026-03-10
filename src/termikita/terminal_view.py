@@ -71,6 +71,8 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         self._prev_cursor_pos: tuple[int, int] | None = None
         # Layer-backed view enables GPU compositing for smoother drawing
         self.setWantsLayer_(True)
+        if self.layer():
+            self.layer().setDrawsAsynchronously_(True)
 
     def _init_session(self) -> None:
         cw, ch = self._renderer.get_cell_dimensions()
