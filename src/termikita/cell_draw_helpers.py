@@ -3,12 +3,12 @@
 These functions are called by TextRenderer.draw_line() and operate directly
 on the current AppKit graphics context. Each helper handles one rendering pass:
   - draw_backgrounds  : Pass 1 — background fill rectangles (batched by color)
-  - draw_glyphs       : Pass 2 — foreground text (batched NSMutableAttributedString)
+  - draw_glyphs       : Pass 2 — foreground text (cached per-cell positioning)
   - draw_decorations  : Pass 3 — underline / strikethrough via NSBezierPath
 
-Performance: draw_glyphs builds ONE attributed string per row with attribute
-ranges, then issues a single drawAtPoint_ call. This reduces ObjC bridge
-overhead from ~80 calls/row to ~10 calls/row.
+Performance: draw_glyphs caches NSAttributedString objects per unique
+(char, bold, italic, fg, bg, reverse) combination. After the first frame,
+zero allocations — only drawAtPoint_ calls at exact grid positions.
 """
 
 from __future__ import annotations
@@ -21,6 +21,12 @@ from termikita.color_resolver import resolve_cell_colors
 # Decoration line stroke width (points)
 _DECO_WIDTH = 1.0
 
+# Glyph cache: (char, bold, italic, fg, bg, reverse) -> NSAttributedString
+# Cleared on theme change. Max ~4096 entries (covers ASCII × styles × colors).
+_GLYPH_CACHE: dict[tuple, object] = {}
+_GLYPH_CACHE_MAX = 4096
+_GLYPH_CACHE_THEME_ID: int = 0
+
 
 def _is_wide_char(ch: str) -> bool:
     """Check if character is double-width (CJK, emoji, fullwidth).
@@ -30,6 +36,11 @@ def _is_wide_char(ch: str) -> bool:
     if not ch or len(ch) != 1:
         return False
     return unicodedata.east_asian_width(ch) in ("W", "F")
+
+
+def invalidate_glyph_cache() -> None:
+    """Clear glyph cache (call on theme or font change)."""
+    _GLYPH_CACHE.clear()
 
 
 def draw_backgrounds(
@@ -78,72 +89,22 @@ def draw_glyphs(
     fonts: dict[tuple[bool, bool], object],
     theme: dict,
 ) -> None:
-    """Pass 2: draw row text as a single NSMutableAttributedString.
+    """Pass 2: draw text glyphs at exact grid positions with cached attr strings.
 
-    Fast path: builds one attributed string for the row with attribute ranges,
-    then draws with a single drawAtPoint_ call. Falls back to per-cell for
-    rows containing wide chars (emoji/CJK) where font fallback may shift advances.
+    Each unique (char, style, color) gets a cached NSAttributedString. After
+    first frame, zero ObjC allocations — only drawAtPoint_ per visible cell.
     """
-    has_wide = any(_is_wide_char(c.char) for c in cells if c.char)
-    if has_wide:
-        _draw_glyphs_percell(cells, y, cell_w, baseline, fonts, theme)
-    else:
-        _draw_glyphs_batched(cells, y, cell_w, baseline, fonts, theme)
+    global _GLYPH_CACHE_THEME_ID
 
-
-def _draw_glyphs_batched(
-    cells: list[CellData], y: float, cell_w: float,
-    baseline: float, fonts: dict, theme: dict,
-) -> None:
-    """Fast path: one NSMutableAttributedString per row, one draw call."""
-    try:
-        from AppKit import NSMutableAttributedString  # type: ignore[import]
-        import AppKit  # type: ignore[import]
-        from Foundation import NSMakeRange  # type: ignore[import]
-
-        # Build row text (spaces for empty cells to maintain cell positioning)
-        row_text = "".join(c.char if c.char else " " for c in cells)
-        if not row_text.strip():
-            return
-
-        ns_str = AppKit.NSString.stringWithString_(row_text)
-        attr_str = NSMutableAttributedString.alloc().initWithString_(ns_str)
-
-        # Apply attributes in contiguous runs (same bold/italic/fg/bg/reverse)
-        i, n = 0, len(cells)
-        while i < n:
-            cell = cells[i]
-            key = (cell.bold, cell.italic, cell.fg, cell.bg, cell.reverse)
-            # Find end of same-attribute run
-            j = i + 1
-            while j < n:
-                c2 = cells[j]
-                if (c2.bold, c2.italic, c2.fg, c2.bg, c2.reverse) != key:
-                    break
-                j += 1
-            # Resolve color and font once per run
-            fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
-            font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
-            attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}
-            if font:
-                attrs[AppKit.NSFontAttributeName] = font
-            attr_str.setAttributes_range_(attrs, NSMakeRange(i, j - i))
-            i = j
-
-        # Single draw call for entire row
-        attr_str.drawAtPoint_(AppKit.NSMakePoint(0, y + baseline))
-    except Exception:
-        pass
-
-
-def _draw_glyphs_percell(
-    cells: list[CellData], y: float, cell_w: float,
-    baseline: float, fonts: dict, theme: dict,
-) -> None:
-    """Slow path: per-cell drawing for rows with wide chars (emoji/CJK)."""
     try:
         from AppKit import NSAttributedString  # type: ignore[import]
         import AppKit  # type: ignore[import]
+
+        # Clear cache on theme change
+        theme_id = id(theme)
+        if theme_id != _GLYPH_CACHE_THEME_ID:
+            _GLYPH_CACHE.clear()
+            _GLYPH_CACHE_THEME_ID = theme_id
 
         skip_next = False
         for i, cell in enumerate(cells):
@@ -155,13 +116,26 @@ def _draw_glyphs_percell(
                 continue
             if _is_wide_char(ch):
                 skip_next = True
-            font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
-            fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
-            attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}
-            if font:
-                attrs[AppKit.NSFontAttributeName] = font
-            ns_str = AppKit.NSString.stringWithString_(ch)
-            attr_str = NSAttributedString.alloc().initWithString_attributes_(ns_str, attrs)
+
+            # Cache lookup — avoids NSString/NSAttributedString allocation
+            cache_key = (ch, cell.bold, cell.italic, cell.fg, cell.bg, cell.reverse)
+            attr_str = _GLYPH_CACHE.get(cache_key)
+
+            if attr_str is None:
+                font = fonts.get((cell.bold, cell.italic)) or fonts.get((False, False))
+                fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
+                attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}
+                if font:
+                    attrs[AppKit.NSFontAttributeName] = font
+                ns_str = AppKit.NSString.stringWithString_(ch)
+                attr_str = NSAttributedString.alloc().initWithString_attributes_(
+                    ns_str, attrs
+                )
+                # Evict all if cache full (simple strategy, refills in 1 frame)
+                if len(_GLYPH_CACHE) >= _GLYPH_CACHE_MAX:
+                    _GLYPH_CACHE.clear()
+                _GLYPH_CACHE[cache_key] = attr_str
+
             attr_str.drawAtPoint_(AppKit.NSMakePoint(i * cell_w, y + baseline))
     except Exception:
         pass
