@@ -18,6 +18,14 @@ from AppKit import (  # type: ignore[import]
     NSColor,
 )
 from Foundation import NSMakeRect  # type: ignore[import]
+from Quartz import (  # type: ignore[import]
+    CGContextSetShouldSmoothFonts,
+    CGContextSetAllowsFontSmoothing,
+    CGContextSetShouldAntialias,
+    CGContextSetShouldSubpixelPositionFonts,
+    CGContextSetAllowsFontSubpixelPositioning,
+    CGContextSetShouldSubpixelQuantizeFonts,
+)
 
 from termikita.color_resolver import resolve_color
 from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
@@ -39,9 +47,22 @@ class TerminalViewDrawMixin:
         if ch <= 0:
             return
 
+        # Configure font rendering for maximum crispness (Phase 02)
+        cg_ctx = context.CGContext()
+        CGContextSetShouldAntialias(cg_ctx, True)
+        CGContextSetAllowsFontSmoothing(cg_ctx, True)
+        # Disable font smoothing for crisp monospace text (like Terminal.app)
+        # Smoothing adds glyph weight — good for prose, bad for terminal grids
+        CGContextSetShouldSmoothFonts(cg_ctx, False)
+        # Subpixel positioning: allows fractional glyph placement for sharper text
+        CGContextSetAllowsFontSubpixelPositioning(cg_ctx, True)
+        CGContextSetShouldSubpixelPositionFonts(cg_ctx, True)
+        # Disable subpixel quantization for smoother glyph placement on Retina
+        CGContextSetShouldSubpixelQuantizeFonts(cg_ctx, False)
+
         # Fill background only for the invalidated rect
         bg_rgb = self._theme_colors.get("background", (30, 30, 30))
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+        NSColor.colorWithSRGBRed_green_blue_alpha_(
             bg_rgb[0] / 255.0, bg_rgb[1] / 255.0, bg_rgb[2] / 255.0, 1.0
         ).setFill()
         NSBezierPath.fillRect_(rect)
@@ -57,18 +78,21 @@ class TerminalViewDrawMixin:
                 context, py + row_idx * ch, lines[row_idx], self._theme_colors, x_offset=px
             )
 
-        # Draw cursor only if its row is within the dirty rect
+        # Draw cursor — respect DECTCEM strictly (matches iTerm2/Alacritty/Kitty).
+        # TUI apps (Claude Code/Ink) hide terminal cursor and render their own
+        # visual cursor as styled text characters. Don't draw over it.
         cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
         at_bottom = self._session.buffer.is_at_bottom
-        if cursor_visible and self._cursor_visible and at_bottom:
+        if self._cursor_visible and cursor_visible and at_bottom:
             if first_row <= cursor_row < last_row:
                 cursor_color = resolve_color(
                     self._theme_colors.get("cursor", (255, 255, 255)),
                     is_fg=True,
                     theme=self._theme_colors,
                 )
+                cursor_style = self._session.buffer.cursor_style
                 self._renderer.draw_cursor(
-                    context, cursor_row, cursor_col, "block", cursor_color,
+                    context, cursor_row, cursor_col, cursor_style, cursor_color,
                     x_offset=px, y_offset=py
                 )
 
@@ -84,7 +108,7 @@ class TerminalViewDrawMixin:
     def _draw_selection_highlight(self, bounds: object) -> None:
         """Shade selected cells with semi-transparent theme selection color."""
         sel_rgb = self._theme_colors.get("selection", (68, 68, 68))
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+        NSColor.colorWithSRGBRed_green_blue_alpha_(
             sel_rgb[0] / 255.0, sel_rgb[1] / 255.0, sel_rgb[2] / 255.0, 0.5
         ).setFill()
 
@@ -155,6 +179,10 @@ class TerminalViewDrawMixin:
         cursor_moved = prev is not None and prev != (cursor_row, cursor_col)
         self._prev_cursor_pos = (cursor_row, cursor_col)
 
+        # Reset cursor blink to visible on movement so typing always shows cursor
+        if cursor_moved:
+            self._cursor_visible = True
+
         dirty_rows = session.buffer.get_dirty_rows()
 
         py = TERMINAL_PADDING_Y
@@ -166,7 +194,8 @@ class TerminalViewDrawMixin:
                 self.setNeedsDisplayInRect_(NSMakeRect(0, py + row * ch, w, ch))
             if cursor_moved and prev:
                 self.setNeedsDisplayInRect_(NSMakeRect(0, py + prev[0] * ch, w, ch))
-                self.setNeedsDisplayInRect_(NSMakeRect(0, py + cursor_row * ch, w, ch))
+            # Always invalidate cursor row so blink and visibility changes render
+            self.setNeedsDisplayInRect_(NSMakeRect(0, py + cursor_row * ch, w, ch))
             session.buffer.clear_dirty()
 
     def blinkCursor_(self, timer: object) -> None:

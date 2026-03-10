@@ -62,7 +62,11 @@ class GlyphAtlas:
         fonts: dict[tuple[bool, bool], object],
         default_advance: float,
     ) -> tuple[float, object]:
-        """Return (advance_width, font_ref) for char, computing and caching if needed."""
+        """Return (advance_width, font_ref) for char, computing and caching if needed.
+
+        For non-ASCII characters, uses CoreText font fallback to find a font
+        that can actually render the glyph (prevents "??" for missing glyphs).
+        """
         key = (char, bold, italic)
         entry = self._cache.get(key)
         if entry is not None:
@@ -71,6 +75,9 @@ class GlyphAtlas:
             return entry
 
         font = fonts.get((bold, italic)) or fonts.get((False, False))
+        # For non-ASCII, find a font that can render this character
+        if font and char and ord(char) > 0x7E:
+            font = _find_fallback_font(font, char)
         advance = _measure_advance(font, char, default_advance)
         value = (advance, font)
         self._put(key, value)
@@ -101,6 +108,23 @@ class GlyphAtlas:
 # ---------------------------------------------------------------------------
 # Module-level helper (keeps GlyphAtlas class lean)
 # ---------------------------------------------------------------------------
+
+def _find_fallback_font(primary_font: object, char: str) -> object:
+    """Use CoreText to find a font that can render *char*.
+
+    CTFontCreateForString checks the primary font's cascade list and
+    system fonts, returning a font that has the glyph. Returns primary
+    if it already covers the character.
+    """
+    try:
+        from CoreText import CTFontCreateForString  # type: ignore[import]
+        from CoreFoundation import CFRangeMake  # type: ignore[import]
+
+        result = CTFontCreateForString(primary_font, char, CFRangeMake(0, len(char)))
+        return result if result else primary_font
+    except Exception:
+        return primary_font
+
 
 def _measure_advance(font: object, char: str, fallback: float) -> float:
     """Return advance width for *char* in *font*, or *fallback* on failure."""

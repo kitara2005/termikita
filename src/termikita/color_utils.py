@@ -11,7 +11,7 @@ def rgb_to_nscolor(r: int, g: int, b: int):
     """Convert RGB (0-255) to NSColor (macOS AppKit color object)."""
     from AppKit import NSColor  # type: ignore[import]
 
-    return NSColor.colorWithCalibratedRed_green_blue_alpha_(
+    return NSColor.colorWithSRGBRed_green_blue_alpha_(
         r / 255.0, g / 255.0, b / 255.0, 1.0
     )
 

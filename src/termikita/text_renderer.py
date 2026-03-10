@@ -12,8 +12,10 @@ from termikita.color_resolver import resolve_color
 from termikita.buffer_manager import CellData
 from termikita.cell_draw_helpers import draw_backgrounds, draw_glyphs, draw_decorations
 
-# Line-height multiplier applied to raw ascender+descender+leading
-_LINE_HEIGHT_MULT = 1.35
+# Line-height multiplier applied to ceiled font metrics.
+# 1.0 matches Terminal.app (tight lines, block art connects perfectly).
+# Values >1.0 add inter-line spacing but break block character art (█▄▀).
+_LINE_HEIGHT_MULT = 1.0
 # Cursor beam width in points
 _BEAM_WIDTH = 2.0
 # Decoration / cursor underline stroke width in points
@@ -31,6 +33,10 @@ class TextRenderer:
         self.cell_width: float = 8.0
         self.cell_height: float = 16.0
         self.baseline_offset: float = 3.0
+        # Individual font metrics for coordinate calculations
+        self.ascender: float = 12.0
+        self.descender: float = 3.0
+        self.leading: float = 0.0
         self._atlas = GlyphAtlas()
         # (bold, italic) -> NSFont; rebuilt by set_font()
         self._fonts: dict[tuple[bool, bool], object] = {}
@@ -49,6 +55,12 @@ class TextRenderer:
             bold      = _safe_convert(fm, font, 0x2) or font   # NSBoldFontMask
             italic    = _safe_convert(fm, font, 0x1) or font   # NSItalicFontMask
             bold_italic = _safe_convert(fm, bold, 0x1) or bold
+
+            # Add system font cascade for missing glyph fallback
+            font      = _add_font_cascade(font)
+            bold      = _add_font_cascade(bold)
+            italic    = _add_font_cascade(italic)
+            bold_italic = _add_font_cascade(bold_italic)
 
             self.primary_font    = font
             self.bold_font       = bold
@@ -93,7 +105,7 @@ class TextRenderer:
         if not cells:
             return
         draw_backgrounds(cells, y, self.cell_width, self.cell_height, theme_colors, x_offset)
-        draw_glyphs(cells, y, self.cell_width, self.baseline_offset, self._fonts, theme_colors, x_offset)
+        draw_glyphs(cells, y, self.cell_width, self.baseline_offset, self._fonts, theme_colors, x_offset, cell_h=self.cell_height)
         draw_decorations(cells, y, self.cell_width, self.cell_height, self.baseline_offset, theme_colors, x_offset)
 
     def draw_cursor(
@@ -118,8 +130,17 @@ class TextRenderer:
             if style == "beam":
                 NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, _BEAM_WIDTH, self.cell_height))
             elif style == "underline":
-                NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, self.cell_width, _DECO_WIDTH))
+                # Underline at bottom of cell (isFlipped: y increases downward)
+                NSBezierPath.fillRect_(AppKit.NSMakeRect(
+                    x, row_y + self.cell_height - _DECO_WIDTH * 2, self.cell_width, _DECO_WIDTH * 2
+                ))
             else:
+                # Block cursor — semi-transparent so text beneath is visible
+                from AppKit import NSColor  # type: ignore[import]
+                NSColor.colorWithSRGBRed_green_blue_alpha_(
+                    color.redComponent(), color.greenComponent(),
+                    color.blueComponent(), 0.7
+                ).setFill()
                 NSBezierPath.fillRect_(AppKit.NSMakeRect(x, row_y, self.cell_width, self.cell_height))
         except Exception:
             pass
@@ -142,7 +163,8 @@ class TextRenderer:
             import AppKit  # type: ignore[import]
 
             x    = x_offset + cursor_col * self.cell_width
-            pt_y = y_offset + cursor_row * self.cell_height + self.baseline_offset
+            # In flipped view, drawAtPoint_ y = top of text layout area
+            pt_y = y_offset + cursor_row * self.cell_height
             fg   = resolve_color("default", is_fg=True, theme=theme_colors)
             font = self._fonts.get((False, False))
             attrs: dict = {AppKit.NSForegroundColorAttributeName: fg, NSUnderlineStyleAttributeName: 1}
@@ -155,22 +177,107 @@ class TextRenderer:
             pass
 
     def _calculate_metrics(self) -> None:
-        """Derive cell_width, cell_height, baseline_offset from primary font."""
+        """Derive cell_width, cell_height, baseline_offset from primary font.
+
+        Uses ceiled font metrics (matching Terminal.app behavior) so block
+        characters (█▄▀) tile seamlessly without sub-pixel gaps.
+        """
         font = self.primary_font
         if font is None:
             return
         try:
+            import math
             glyph_id = font.glyphWithName_("M")
             self.cell_width = (
                 font.advancementForGlyph_(glyph_id).width
                 if glyph_id
                 else font.maximumAdvancement().width
             )
-            raw_height      = font.ascender() + abs(font.descender()) + font.leading()
-            self.cell_height    = raw_height * _LINE_HEIGHT_MULT
-            self.baseline_offset = abs(font.descender())
+            # Ceil individual metrics like NSLayoutManager does for line height
+            self.ascender = math.ceil(font.ascender())
+            self.descender = math.ceil(abs(font.descender()))
+            self.leading = math.ceil(font.leading())
+            self.cell_height = (self.ascender + self.descender + self.leading) * _LINE_HEIGHT_MULT
+            # baseline_offset = descender: distance from cell BOTTOM to baseline
+            # Used by CTLine path (locally-flipped context where y=0 is cell bottom)
+            self.baseline_offset = self.descender
         except Exception:
             pass  # retain previous safe defaults
+
+
+def _add_font_cascade(font: object) -> object:
+    """Add system font cascade list so CoreText can find missing glyphs.
+
+    Without this, characters not in the primary font render as '??'.
+    The cascade list tells CoreText to try these fonts in order.
+    Includes Nerd Font fallbacks for Powerline/devicon glyphs (PUA U+E000-U+F8FF).
+    """
+    try:
+        from CoreText import (  # type: ignore[import]
+            CTFontCreateCopyWithAttributes,
+            CTFontDescriptorCreateWithNameAndSize,
+            kCTFontCascadeListAttribute,
+        )
+        # Detect installed Nerd Fonts for Powerline/icon glyph coverage
+        nerd_descriptors = _find_nerd_font_descriptors()
+        cascade = [
+            *nerd_descriptors,
+            # Symbols, geometric shapes, arrows, dingbats
+            CTFontDescriptorCreateWithNameAndSize("Apple Symbols", 0),
+            # Emoji support
+            CTFontDescriptorCreateWithNameAndSize("Apple Color Emoji", 0),
+            # Monospace fallbacks (box drawing, powerline, etc.)
+            CTFontDescriptorCreateWithNameAndSize("Menlo", 0),
+            CTFontDescriptorCreateWithNameAndSize("Monaco", 0),
+            # Broad Unicode coverage (diamonds ◆, bullets ●, arrows ▶)
+            CTFontDescriptorCreateWithNameAndSize("Lucida Grande", 0),
+            CTFontDescriptorCreateWithNameAndSize("Helvetica Neue", 0),
+            # System UI font — widest coverage on macOS
+            CTFontDescriptorCreateWithNameAndSize(".AppleSystemUIFont", 0),
+        ]
+        from CoreText import CTFontDescriptorCreateCopyWithAttributes  # type: ignore[import]
+        desc = font.fontDescriptor()
+        new_desc = CTFontDescriptorCreateCopyWithAttributes(
+            desc, {kCTFontCascadeListAttribute: cascade}
+        )
+        return CTFontCreateCopyWithAttributes(font, font.pointSize(), None, new_desc)
+    except Exception:
+        return font
+
+
+def _find_nerd_font_descriptors() -> list:
+    """Detect installed Nerd Fonts and return CTFontDescriptors for cascade.
+
+    Checks for Symbols Nerd Font (icons-only) first, then common full Nerd Fonts.
+    Only returns descriptors for fonts actually available on the system.
+    """
+    try:
+        from AppKit import NSFontManager  # type: ignore[import]
+        from CoreText import CTFontDescriptorCreateWithNameAndSize  # type: ignore[import]
+
+        fm = NSFontManager.sharedFontManager()
+        available = set(fm.availableFontFamilies())
+        # Ordered by preference: symbols-only first, then popular full Nerd Fonts
+        candidates = [
+            "Symbols Nerd Font Mono",
+            "Symbols Nerd Font",
+            "MesloLGS Nerd Font Mono",
+            "MesloLGS NF",
+            "Hack Nerd Font Mono",
+            "Hack Nerd Font",
+            "JetBrainsMono Nerd Font Mono",
+            "JetBrainsMono Nerd Font",
+            "FiraCode Nerd Font Mono",
+            "FiraCode Nerd Font",
+        ]
+        descriptors = []
+        for name in candidates:
+            if name in available:
+                descriptors.append(CTFontDescriptorCreateWithNameAndSize(name, 0))
+                break  # one Nerd Font is enough for PUA coverage
+        return descriptors
+    except Exception:
+        return []
 
 
 def _safe_convert(fm: object, font: object, trait_mask: int) -> object | None:

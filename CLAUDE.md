@@ -61,6 +61,13 @@ This ensures packages installed by `install.sh` (google-genai, pypdf, etc.) are 
 
 **IMPORTANT:** When scripts of skills failed, don't stop, try to fix them directly.
 
+## Build Environment
+
+- Python 3.14.3 venv available at `.venv/`
+- Build command: `.venv/bin/python setup.py py2app`
+- Run from source: `.venv/bin/python -m termikita`
+- All dependencies (pyobjc, pyte, py2app) pre-installed in `.venv`
+
 ## [IMPORTANT] Consider Modularization
 - If a code file exceeds 200 lines of code, consider modularizing it
 - Check existing modules before creating new

@@ -16,6 +16,8 @@ from AppKit import (  # type: ignore[import]
 )
 from Foundation import NSNotFound, NSMakeRange  # type: ignore[import]
 
+from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
+
 
 class TerminalViewInputMixin:
     """NSTextInputClient protocol + selection helpers.
@@ -30,10 +32,20 @@ class TerminalViewInputMixin:
     # ------------------------------------------------------------------
 
     def insertText_replacementRange_(self, string: object, replacementRange: object) -> None:
-        """IME commits final composed text, or regular key character input."""
+        """IME commits final composed text, or regular key character input.
+
+        Marked text (composition preview) is never sent to PTY, so no
+        backspaces needed — just clear composition state and send the
+        final committed text.
+        """
+        # Extract plain text from NSString or NSAttributedString
+        text = string.string() if hasattr(string, "string") else str(string)
+        text = str(text) if text else ""
+
+        # Clear composition state unconditionally — MUST happen before PTY write
         self._marked_text = None
         self._marked_range = (NSNotFound, 0)
-        text = str(string)
+
         if text:
             self._session.write(text.encode("utf-8"))
         self.setNeedsDisplay_(True)
@@ -42,7 +54,9 @@ class TerminalViewInputMixin:
         self, string: object, selRange: object, replRange: object
     ) -> None:
         """Called while IME is composing — display but do NOT send to PTY."""
-        self._marked_text = str(string) if string else None
+        # Extract plain text from NSString or NSAttributedString
+        text = string.string() if hasattr(string, "string") else str(string) if string else None
+        self._marked_text = str(text) if text else None
         if self._marked_text:
             self._marked_range = (0, len(self._marked_text))
         else:
@@ -72,9 +86,8 @@ class TerminalViewInputMixin:
         from Foundation import NSMakeRect  # type: ignore[import]
 
         cursor_row, cursor_col, _ = self._session.buffer.get_cursor()
-        x = cursor_col * self._renderer.cell_width
-        # isFlipped=True: y grows downward, so cursor top = row * cell_height
-        y = cursor_row * self._renderer.cell_height
+        x = TERMINAL_PADDING_X + cursor_col * self._renderer.cell_width
+        y = TERMINAL_PADDING_Y + cursor_row * self._renderer.cell_height
         rect = NSMakeRect(x, y, 0, self._renderer.cell_height)
         try:
             window_rect = self.convertRect_toView_(rect, None)
@@ -99,17 +112,17 @@ class TerminalViewInputMixin:
 
     def mouseDown_(self, event: object) -> None:
         point = self.convertPoint_fromView_(event.locationInWindow(), None)
-        col = int(point.x / self._renderer.cell_width)
-        row = int(point.y / self._renderer.cell_height)
-        self._selection_start = (row, max(0, col))
+        col = int((point.x - TERMINAL_PADDING_X) / self._renderer.cell_width)
+        row = int((point.y - TERMINAL_PADDING_Y) / self._renderer.cell_height)
+        self._selection_start = (max(0, row), max(0, col))
         self._selection_end = None
         self.setNeedsDisplay_(True)
 
     def mouseDragged_(self, event: object) -> None:
         point = self.convertPoint_fromView_(event.locationInWindow(), None)
-        col = int(point.x / self._renderer.cell_width)
-        row = int(point.y / self._renderer.cell_height)
-        self._selection_end = (row, max(0, col))
+        col = int((point.x - TERMINAL_PADDING_X) / self._renderer.cell_width)
+        row = int((point.y - TERMINAL_PADDING_Y) / self._renderer.cell_height)
+        self._selection_end = (max(0, row), max(0, col))
         self.setNeedsDisplay_(True)
 
     def mouseUp_(self, event: object) -> None:

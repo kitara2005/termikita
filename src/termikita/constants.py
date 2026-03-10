@@ -38,6 +38,20 @@ THEMES_DIR = _get_themes_dir()
 DEFAULT_TERM = "xterm-256color"
 DEFAULT_COLORTERM = "truecolor"  # Required for 24-bit color (Claude Code CLI, etc.)
 
+# Font smoothing — reads macOS AppleFontSmoothing preference
+# 0 = thin strokes (no smoothing), 1-3 = smoothing intensity, None = system default (on)
+def get_font_smoothing_enabled() -> bool:
+    """Read AppleFontSmoothing from user defaults. 0 = thin strokes, else = normal."""
+    try:
+        from Foundation import NSUserDefaults  # type: ignore[import]
+        defaults = NSUserDefaults.standardUserDefaults()
+        if defaults.objectForKey_("AppleFontSmoothing") is None:
+            return True  # system default = smoothing on
+        return defaults.integerForKey_("AppleFontSmoothing") != 0
+    except Exception:
+        return True
+
+
 # PTY I/O constants
 PTY_READ_CHUNK_SIZE = 4096   # bytes per os.read() call in the read thread
 PTY_ENV_TERM = "xterm-256color"  # alias kept for explicit PTY usage

@@ -28,6 +28,17 @@ _OSC8_CLOSE_RE = re.compile(r"\x1b]8;;\x07")
 _SYNC_BEGIN_RE = re.compile(r"\x1b\[\?2026h")
 _SYNC_END_RE = re.compile(r"\x1b\[\?2026l")
 
+# DECSCUSR — cursor shape: ESC [ Ps SP q
+_DECSCUSR_RE = re.compile(r"\x1b\[([0-6]?) q")
+_CURSOR_STYLE_MAP = {
+    "": "block", "0": "block", "1": "block", "2": "block",
+    "3": "underline", "4": "underline",
+    "5": "beam", "6": "beam",
+}
+# DECTCEM — cursor show/hide: ESC [ ? 25 h / l
+_DECTCEM_SHOW_RE = re.compile(r"\x1b\[\?25h")
+_DECTCEM_HIDE_RE = re.compile(r"\x1b\[\?25l")
+
 
 class CellData(NamedTuple):
     """Immutable per-cell data for the renderer layer (Phase 04+)."""
@@ -110,6 +121,8 @@ class BufferManager:
         self._scroll_offset: int = 0
         self._synchronized: bool = False       # DEC 2026 batch mode
         self._osc8_current_url: str | None = None
+        self._cursor_style: str = "block"      # DECSCUSR cursor shape (default=block)
+        self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
         self._force_full_redraw: bool = True   # first frame needs full draw
 
     # ------------------------------------------------------------------
@@ -125,6 +138,25 @@ class BufferManager:
             self._synchronized = True
         if _SYNC_END_RE.search(text):
             self._synchronized = False
+
+        # DECTCEM cursor show/hide — track LAST occurrence to get final state.
+        # When both show+hide appear in same chunk (e.g. Claude Code rendering),
+        # the last one determines cursor state.
+        show_matches = list(_DECTCEM_SHOW_RE.finditer(text))
+        hide_matches = list(_DECTCEM_HIDE_RE.finditer(text))
+        last_show = show_matches[-1].start() if show_matches else -1
+        last_hide = hide_matches[-1].start() if hide_matches else -1
+        if last_show > last_hide:
+            self._cursor_hidden = False
+        elif last_hide > last_show:
+            self._cursor_hidden = True
+
+        # DECSCUSR cursor shape (CSI Ps SP q) — use last match, implicitly shows cursor
+        decscusr_matches = list(_DECSCUSR_RE.finditer(text))
+        if decscusr_matches:
+            m = decscusr_matches[-1]
+            self._cursor_style = _CURSOR_STYLE_MAP.get(m.group(1), "block")
+            self._cursor_hidden = False
 
         # OSC 8 hyperlink tracking
         self._osc8_current_url = _last_osc8_url(text, self._osc8_current_url)
@@ -173,7 +205,12 @@ class BufferManager:
     def get_cursor(self) -> tuple[int, int, bool]:
         """(row, col, visible) for the terminal cursor."""
         c = self._screen.cursor
-        return (c.y, c.x, not getattr(c, "hidden", False))
+        return (c.y, c.x, not self._cursor_hidden)
+
+    @property
+    def cursor_style(self) -> str:
+        """Current cursor shape: 'block', 'underline', or 'beam'."""
+        return self._cursor_style
 
     # ------------------------------------------------------------------
     # Dirty tracking

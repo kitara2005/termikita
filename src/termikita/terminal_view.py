@@ -15,7 +15,7 @@ Drawing uses isFlipped=True (top-left origin) so row 0 is at y=0.
 from __future__ import annotations
 
 import objc  # type: ignore[import]
-from AppKit import NSView, NSEventModifierFlagCommand, NSEventModifierFlagControl  # type: ignore[import]
+from AppKit import NSView, NSCursor, NSEventModifierFlagCommand, NSEventModifierFlagControl  # type: ignore[import]
 from Foundation import NSNotFound  # type: ignore[import]
 
 from termikita.terminal_session import TerminalSession
@@ -23,7 +23,10 @@ from termikita.text_renderer import TextRenderer
 from termikita.terminal_view_draw import TerminalViewDrawMixin
 from termikita.terminal_view_input import TerminalViewInputMixin
 from termikita.input_handler import KEY_MAP
-from termikita.constants import DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_PADDING_X, TERMINAL_PADDING_Y
+from termikita.constants import (
+    DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_PADDING_X, TERMINAL_PADDING_Y,
+    get_font_smoothing_enabled,
+)
 
 # Default theme — Phase 07 will load from JSON
 DEFAULT_THEME: dict = {
@@ -69,10 +72,8 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         self._refresh_timer: object = None
         self._back_buffer: object = None
         self._prev_cursor_pos: tuple[int, int] | None = None
-        # Layer-backed view enables GPU compositing for smoother drawing
-        self.setWantsLayer_(True)
-        if self.layer():
-            self.layer().setDrawsAsynchronously_(True)
+        # Font smoothing preference from macOS system defaults
+        self._font_smoothing: bool = get_font_smoothing_enabled()
 
     def _init_session(self) -> None:
         cw, ch = self._renderer.get_cell_dimensions()
@@ -90,11 +91,47 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
     def isFlipped(self) -> bool:
         return True
 
+    def isOpaque(self) -> bool:
+        """View fills entire rect — enables optimized text rendering."""
+        return True
+
     def acceptsFirstResponder(self) -> bool:
         return True
 
     def becomeFirstResponder(self) -> bool:
         return True
+
+    def viewDidMoveToWindow(self) -> None:
+        """Set layer contentsScale to match Retina backing scale factor."""
+        self._sync_layer_scale()
+
+    def viewDidChangeBackingProperties(self) -> None:
+        """Re-sync contentsScale when moving between displays."""
+        self._sync_layer_scale()
+
+    def resetCursorRects(self) -> None:
+        """Set I-beam cursor over terminal area (like native Terminal.app)."""
+        self.addCursorRect_cursor_(self.bounds(), NSCursor.IBeamCursor())
+
+    def _sync_layer_scale(self) -> None:
+        """Ensure layer contentsScale matches Retina backing scale factor.
+
+        Without this, layer-backed views render at 1x on Retina displays,
+        causing text to appear blurry.
+        """
+        layer = self.layer()
+        if not layer:
+            return
+        window = self.window()
+        if window:
+            scale = window.backingScaleFactor()
+        else:
+            # Fallback: use main screen scale before window is available
+            from AppKit import NSScreen  # type: ignore[import]
+            screen = NSScreen.mainScreen()
+            scale = screen.backingScaleFactor() if screen else 2.0
+        layer.setContentsScale_(scale)
+        layer.setOpaque_(True)
 
     def setFrameSize_(self, newSize: object) -> None:
         objc.super(TerminalView, self).setFrameSize_(newSize)
@@ -129,6 +166,13 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
     # ------------------------------------------------------------------
     # PyObjC forwarding: NSTextInputClient (from TerminalViewInputMixin)
     # ------------------------------------------------------------------
+
+    def insertText_(self, string: object) -> None:
+        """NSResponder insertText: — called by interpretKeyEvents_ for regular chars."""
+        from Foundation import NSMakeRange  # type: ignore[import]
+        TerminalViewInputMixin.insertText_replacementRange_(
+            self, string, NSMakeRange(NSNotFound, 0)
+        )
 
     def insertText_replacementRange_(self, string: object, rng: object) -> None:
         TerminalViewInputMixin.insertText_replacementRange_(self, string, rng)
@@ -217,18 +261,20 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
                 if "a" <= ch <= "z":
                     self._session.write(bytes([ord(ch) - ord("a") + 1]))
                     return
-        # Special keys (Return, Tab, Backspace, arrows, etc.) → write directly
+        # Special keys (Return, Tab, Backspace, arrows) ALWAYS go directly to PTY.
+        # If IME is composing, commit/cancel marked text first.
         keycode = event.keyCode()
         if keycode in KEY_MAP:
+            if self.hasMarkedText():
+                self.unmarkText()
             self._session.write(KEY_MAP[keycode])
             return
-        # Regular character input → send UTF-8 bytes to PTY
-        chars = event.characters()
-        if chars:
-            try:
-                self._session.write(chars.encode("utf-8"))
-            except (UnicodeEncodeError, AttributeError):
-                pass
+        # Route through NSTextInputContext for proper IME composition lifecycle.
+        ic = self.inputContext()
+        if ic:
+            ic.handleEvent_(event)
+        else:
+            self.interpretKeyEvents_([event])
 
     def doCommandBySelector_(self, selector: object) -> None:
         pass
