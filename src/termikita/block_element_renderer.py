@@ -44,9 +44,6 @@ def draw_block_elements(
     Returns set of cell indices that were drawn (so CTLine pass can skip them).
     """
     try:
-        from AppKit import NSBezierPath  # type: ignore[import]
-        import AppKit  # type: ignore[import]
-
         from termikita.color_resolver import resolve_cell_colors
     except ImportError:
         return set()
@@ -78,8 +75,8 @@ def draw_block_elements(
 
 def _draw_block(cp: int, x: float, y: float, w: float, h: float) -> None:
     """Draw a block element character as a filled rectangle."""
-    from AppKit import NSBezierPath  # type: ignore[import]
     import AppKit  # type: ignore[import]
+    from AppKit import NSBezierPath  # type: ignore[import]
 
     if cp == 0x2588:  # █ FULL BLOCK
         NSBezierPath.fillRect_(AppKit.NSMakeRect(x, y, w, h))
@@ -115,8 +112,8 @@ def _draw_block(cp: int, x: float, y: float, w: float, h: float) -> None:
 
 def _draw_shade(x: float, y: float, w: float, h: float, alpha: float) -> None:
     """Draw a shade character as semi-transparent fill over cell."""
-    from AppKit import NSBezierPath, NSGraphicsContext  # type: ignore[import]
     import AppKit  # type: ignore[import]
+    from AppKit import NSBezierPath, NSGraphicsContext  # type: ignore[import]
 
     ctx = NSGraphicsContext.currentContext()
     if ctx is None:
@@ -127,8 +124,8 @@ def _draw_shade(x: float, y: float, w: float, h: float, alpha: float) -> None:
 
 def _draw_quadrant(cp: int, x: float, y: float, w: float, h: float) -> None:
     """Draw quadrant block elements (U+2596–U+259F)."""
-    from AppKit import NSBezierPath  # type: ignore[import]
     import AppKit  # type: ignore[import]
+    from AppKit import NSBezierPath  # type: ignore[import]
 
     hw, hh = w / 2, h / 2
     # Quadrant positions: TL, TR, BL, BR
@@ -157,13 +154,14 @@ def _draw_quadrant(cp: int, x: float, y: float, w: float, h: float) -> None:
 
 
 def _draw_box(cp: int, x: float, y: float, w: float, h: float) -> None:
-    """Draw box drawing character as line paths with pixel-snapped coordinates.
+    """Draw box drawing character as filled rectangles for pixel-perfect tiling.
 
-    Disables anti-aliasing and snaps to nearest half-pixel for crisp 1px lines.
-    This prevents fuzzy half-pixel rendering that causes visible gaps.
+    Uses filled rects instead of stroked paths — stroked lines leave sub-pixel
+    gaps between adjacent cells. Filled rects tile seamlessly because each cell's
+    rectangle spans its full width/height with no fractional edge issues.
     """
-    from AppKit import NSBezierPath, NSGraphicsContext  # type: ignore[import]
     import AppKit  # type: ignore[import]
+    from AppKit import NSBezierPath, NSGraphicsContext  # type: ignore[import]
     from Quartz import CGContextSetShouldAntialias  # type: ignore[import]
 
     segments = _BOX_SEGMENTS.get(cp)
@@ -176,29 +174,31 @@ def _draw_box(cp: int, x: float, y: float, w: float, h: float) -> None:
         cgctx = ctx.CGContext()
         CGContextSetShouldAntialias(cgctx, False)
 
-    # Snap center to nearest 0.5pt for crisp 1px lines on Retina
     import math
-    cx = math.floor(x + w / 2) + 0.5
-    cy = math.floor(y + h / 2) + 0.5
+    lw = _BOX_LINE_WIDTH
+    # Center of cell, snapped to pixel grid
+    cx = math.floor(x + w / 2)
+    cy = math.floor(y + h / 2)
 
     right, left, down, up = segments
-    path = NSBezierPath.bezierPath()
-    path.setLineWidth_(_BOX_LINE_WIDTH)
 
-    if right:
-        path.moveToPoint_(AppKit.NSMakePoint(cx, cy))
-        path.lineToPoint_(AppKit.NSMakePoint(x + w, cy))
-    if left:
-        path.moveToPoint_(AppKit.NSMakePoint(cx, cy))
-        path.lineToPoint_(AppKit.NSMakePoint(x, cy))
-    if down:
-        path.moveToPoint_(AppKit.NSMakePoint(cx, cy))
-        path.lineToPoint_(AppKit.NSMakePoint(cx, y + h))
-    if up:
-        path.moveToPoint_(AppKit.NSMakePoint(cx, cy))
-        path.lineToPoint_(AppKit.NSMakePoint(cx, y))
+    # Horizontal segments: filled rect spanning full cell width at center y
+    if right and left:
+        # Full horizontal line — single rect spans entire cell width
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(x, cy, w, lw))
+    elif right:
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(cx, cy, x + w - cx, lw))
+    elif left:
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(x, cy, cx + lw - x, lw))
 
-    path.stroke()
+    # Vertical segments: filled rect spanning full cell height at center x
+    if down and up:
+        # Full vertical line — single rect spans entire cell height
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(cx, y, lw, h))
+    elif down:
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(cx, cy, lw, y + h - cy))
+    elif up:
+        NSBezierPath.fillRect_(AppKit.NSMakeRect(cx, y, lw, cy + lw - y))
 
     # Re-enable anti-aliasing for subsequent text rendering
     if ctx:

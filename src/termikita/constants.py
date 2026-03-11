@@ -53,5 +53,5 @@ def get_font_smoothing_enabled() -> bool:
 
 
 # PTY I/O constants
-PTY_READ_CHUNK_SIZE = 4096   # bytes per os.read() call in the read thread
+PTY_READ_CHUNK_SIZE = 65536  # bytes per os.read() call in the read thread
 PTY_ENV_TERM = "xterm-256color"  # alias kept for explicit PTY usage

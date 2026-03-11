@@ -6,11 +6,11 @@ and color resolution to color_resolver. The caller's NSView owns the context.
 
 from __future__ import annotations
 
+from termikita.buffer_manager import CellData
+from termikita.cell_draw_helpers import draw_backgrounds, draw_decorations, draw_glyphs
+from termikita.color_resolver import resolve_color
 from termikita.constants import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 from termikita.glyph_atlas import GlyphAtlas
-from termikita.color_resolver import resolve_color
-from termikita.buffer_manager import CellData
-from termikita.cell_draw_helpers import draw_backgrounds, draw_glyphs, draw_decorations
 
 # Line-height multiplier applied to ceiled font metrics.
 # 1.0 matches Terminal.app (tight lines, block art connects perfectly).
@@ -120,8 +120,8 @@ class TextRenderer:
     ) -> None:
         """Draw terminal cursor at grid position (row, col)."""
         try:
-            from AppKit import NSBezierPath  # type: ignore[import]
             import AppKit  # type: ignore[import]
+            from AppKit import NSBezierPath  # type: ignore[import]
 
             x     = x_offset + col * self.cell_width
             row_y = y_offset + row * self.cell_height
@@ -155,19 +155,39 @@ class TextRenderer:
         x_offset: float = 0.0,
         y_offset: float = 0.0,
     ) -> None:
-        """Render IME composing text with underline highlight at cursor position."""
+        """Render IME composing text with background fill and underline at cursor."""
         if not text:
             return
         try:
-            from AppKit import NSAttributedString, NSUnderlineStyleAttributeName  # type: ignore[import]
             import AppKit  # type: ignore[import]
+            from AppKit import (  # type: ignore[import]
+                NSAttributedString,
+                NSBezierPath,
+                NSUnderlineStyleAttributeName,
+            )
+
+            from termikita.unicode_utils import normalize_text, string_display_width
+
+            # NFC-normalize marked text — IME may send decomposed Vietnamese
+            text = normalize_text(text)
+            text_width = string_display_width(text)
 
             x    = x_offset + cursor_col * self.cell_width
-            # In flipped view, drawAtPoint_ y = top of text layout area
             pt_y = y_offset + cursor_row * self.cell_height
+
+            # Fill background behind marked text so it's readable over terminal content
+            bg = resolve_color("default", is_fg=False, theme=theme_colors)
+            bg.set()
+            NSBezierPath.fillRect_(AppKit.NSMakeRect(
+                x, pt_y, text_width * self.cell_width, self.cell_height
+            ))
+
             fg   = resolve_color("default", is_fg=True, theme=theme_colors)
             font = self._fonts.get((False, False))
-            attrs: dict = {AppKit.NSForegroundColorAttributeName: fg, NSUnderlineStyleAttributeName: 1}
+            attrs: dict = {
+                AppKit.NSForegroundColorAttributeName: fg,
+                NSUnderlineStyleAttributeName: 1,
+            }
             if font:
                 attrs[AppKit.NSFontAttributeName] = font
             ns_str   = AppKit.NSString.stringWithString_(text)
