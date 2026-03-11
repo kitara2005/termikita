@@ -86,10 +86,17 @@ def _resolve_pua_char(ch: str, primary_font: object) -> tuple[str, object]:
     return result
 
 
+# Font fallback cache: codepoint (int) -> resolved font object.
+# Sentinel: maps to primary_font itself when no fallback is needed.
+# Avoids repeated CTFontCreateForString calls (10-100us each) for repeated chars.
+_FONT_FALLBACK_CACHE: dict[int, object] = {}
+
+
 def invalidate_glyph_cache() -> None:
     """Clear glyph cache (call on theme or font change)."""
     _GLYPH_CACHE.clear()
     _PUA_RESOLVE_CACHE.clear()
+    _FONT_FALLBACK_CACHE.clear()
 
 
 def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) -> object:
@@ -120,14 +127,25 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
         # may not cover. Skip Latin Extended / Vietnamese (U+0080–U+1FFF) since
         # the cascade list already handles those correctly without width drift.
         if primary_font:
+            font_id = id(primary_font)  # key includes font identity
             ns_pos = 0
             for ch in text:
                 ch_len = 2 if ord(ch) > 0xFFFF else 1  # UTF-16 code units
-                if ord(ch) >= 0x2000:
-                    fallback = CTFontCreateForString(
-                        primary_font, ch, CFRangeMake(0, len(ch))
-                    )
-                    if fallback and fallback.fontName() != primary_font.fontName():
+                cp = ord(ch)
+                if cp >= 0x2000:
+                    cache_key = (cp, font_id)
+                    fallback = _FONT_FALLBACK_CACHE.get(cache_key)
+                    if fallback is None:
+                        # Cache miss — call CoreText and store result
+                        resolved = CTFontCreateForString(
+                            primary_font, ch, CFRangeMake(0, len(ch))
+                        )
+                        if resolved and resolved.fontName() != primary_font.fontName():
+                            fallback = resolved
+                        else:
+                            fallback = primary_font  # sentinel: no fallback needed
+                        _FONT_FALLBACK_CACHE[cache_key] = fallback
+                    if fallback is not primary_font:
                         char_range = NSMakeRange(ns_pos, ch_len)
                         mut_str.addAttribute_value_range_(
                             AppKit.NSFontAttributeName, fallback, char_range

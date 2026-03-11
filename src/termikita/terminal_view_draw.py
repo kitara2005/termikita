@@ -34,6 +34,10 @@ from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
 class TerminalViewDrawMixin:
     """Drawing, timers, resize, and scroll helpers for TerminalView."""
 
+    # Row content hashes from previous draw — used to skip unchanged rows.
+    # Reset on resize or scroll (via setNeedsDisplay_ full redraw).
+    _prev_row_hashes: list = []
+
     # ------------------------------------------------------------------
     # drawRect_ — partial redraw: only rows intersecting dirty rect
     # ------------------------------------------------------------------
@@ -73,9 +77,22 @@ class TerminalViewDrawMixin:
         first_row = max(0, int((rect.origin.y - py) / ch))
         last_row = min(len(lines), int((rect.origin.y - py + rect.size.height) / ch) + 1)
 
+        # Grow hash list to match row count (list may be empty on first draw)
+        total_rows = len(lines)
+        if len(self._prev_row_hashes) != total_rows:
+            self._prev_row_hashes = [None] * total_rows
+
         for row_idx in range(first_row, last_row):
+            cells = lines[row_idx]
+            # Hash row content: skip redraw if unchanged since last frame
+            row_hash = hash(
+                tuple((c.char, c.fg, c.bg, c.bold, c.italic, c.reverse) for c in cells)
+            )
+            if self._prev_row_hashes[row_idx] == row_hash:
+                continue  # unchanged row — skip draw call
+            self._prev_row_hashes[row_idx] = row_hash
             self._renderer.draw_line(
-                context, py + row_idx * ch, lines[row_idx], self._theme_colors, x_offset=px
+                context, py + row_idx * ch, cells, self._theme_colors, x_offset=px
             )
 
         # Draw cursor — respect DECTCEM strictly (matches iTerm2/Alacritty/Kitty).
@@ -140,6 +157,8 @@ class TerminalViewDrawMixin:
             self._session.buffer.scroll_up(max(1, int(delta * 3)))
         elif delta < 0:
             self._session.buffer.scroll_down(max(1, int(abs(delta) * 3)))
+        # Viewport content changed — reset row hash cache for full redraw
+        self._prev_row_hashes = []
         self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
@@ -183,10 +202,18 @@ class TerminalViewDrawMixin:
         if cursor_moved:
             self._cursor_visible = True
 
+        # Skip refresh when idle: no PTY output and cursor hasn't moved.
+        # consume_new_output() clears the flag so next call reflects fresh data.
+        has_output = session.buffer.consume_new_output()
+        if not has_output and not cursor_moved and not session.buffer.dirty:
+            return
+
         dirty_rows = session.buffer.get_dirty_rows()
 
         py = TERMINAL_PADDING_Y
         if dirty_rows is None:
+            # Full redraw — invalidate row hash cache so all rows are redrawn
+            self._prev_row_hashes = []
             self.setNeedsDisplay_(True)
             session.buffer.clear_dirty()
         elif dirty_rows or cursor_moved:
