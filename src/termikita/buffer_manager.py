@@ -246,33 +246,33 @@ class BufferManager:
     def find_visual_cursor_for_ime(self) -> tuple[int, int]:
         """Find visual cursor position for IME marked text placement.
 
-        TUI frameworks (e.g. Ink used by Claude Code) render a visual cursor
-        as a styled buffer character but place the actual terminal cursor rows
-        below the input area.  When the cursor row is blank, scan upward to
-        find the last row with visible content and position after its rightmost
-        non-blank character.
+        TUI frameworks (e.g. Ink used by Claude Code) hide the terminal cursor
+        and render a visual cursor as a reverse-video cell. The real terminal
+        cursor ends up below the visible content area, causing IME composing
+        text to appear at the wrong position.
+
+        Strategy:
+        1. If cursor is visible (DECTCEM show) → trust real position
+        2. If hidden → scan for reverse-video cell (TUI visual cursor)
+        3. Fallback → use real cursor position
         """
-        row, col, _ = self.get_cursor()
+        row, col, visible = self.get_cursor()
+        # Cursor visible (standard shell, vim, etc.) → use real position
+        if visible:
+            return (row, col)
+        # Cursor hidden (TUI app) — scan for reverse-video cell as visual cursor.
+        # TUI frameworks like Ink render input cursor as a single reverse-video
+        # character. Scan bottom-to-top to find the closest one to the real cursor.
         try:
             buf = self._screen.buffer
-            # Cursor row has content → trust real position
-            row_data = buf[row]
-            if row_data and any(
-                c.data.strip() for c in row_data.values() if hasattr(c, "data")
-            ):
-                return (row, col)
-            # Scan upward for last content row
-            for r in range(row - 1, max(row - 20, -1), -1):
+            for r in range(self._screen.lines - 1, -1, -1):
                 rd = buf[r]
                 if not rd:
                     continue
-                if any(c.data.strip() for c in rd.values() if hasattr(c, "data")):
-                    last_col = max(
-                        (ci + 1 for ci, ch in rd.items()
-                         if hasattr(ch, "data") and ch.data.strip()),
-                        default=0,
-                    )
-                    return (r, min(last_col, self.columns - 1))
+                for c in sorted(rd.keys(), reverse=True):
+                    cell = rd.get(c)
+                    if cell and getattr(cell, "reverse", False):
+                        return (r, c)
         except Exception:
             pass
         return (row, col)
