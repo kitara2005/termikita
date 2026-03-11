@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import unicodedata
 
+from termikita.block_element_renderer import draw_block_elements
 from termikita.buffer_manager import CellData
 from termikita.color_resolver import resolve_cell_colors
-from termikita.block_element_renderer import is_drawable_element, draw_block_elements
 
 # Decoration line stroke width (points)
 _DECO_WIDTH = 1.0
@@ -28,7 +28,8 @@ _USE_CTLINE_RENDERING = True
 # Per-cell glyph cache (fallback): (char, bold, italic, fg, bg, reverse) -> NSAttributedString
 _GLYPH_CACHE: dict[tuple, object] = {}
 _GLYPH_CACHE_MAX = 4096
-_GLYPH_CACHE_THEME_ID: int = 0
+# Use frozenset of theme items for content-based invalidation (id() changes every frame)
+_GLYPH_CACHE_THEME_KEY: object = None
 
 
 def _is_wide_char(ch: str) -> bool:
@@ -68,8 +69,8 @@ def _resolve_pua_char(ch: str, primary_font: object) -> tuple[str, object]:
         return cached
 
     try:
-        from CoreText import CTFontCreateForString  # type: ignore[import]
         from CoreFoundation import CFRangeMake  # type: ignore[import]
+        from CoreText import CTFontCreateForString  # type: ignore[import]
 
         fallback = CTFontCreateForString(primary_font, ch, CFRangeMake(0, len(ch)))
         if fallback and fallback.fontName() != primary_font.fontName():
@@ -101,9 +102,9 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
     """
     try:
         import AppKit  # type: ignore[import]
-        from Foundation import NSMutableAttributedString, NSMakeRange  # type: ignore[import]
-        from CoreText import CTFontCreateForString  # type: ignore[import]
         from CoreFoundation import CFRangeMake  # type: ignore[import]
+        from CoreText import CTFontCreateForString  # type: ignore[import]
+        from Foundation import NSMakeRange, NSMutableAttributedString  # type: ignore[import]
 
         mut_str = NSMutableAttributedString.alloc().initWithString_(text)
         full_range = NSMakeRange(0, len(text))
@@ -115,12 +116,14 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
                 AppKit.NSFontAttributeName, primary_font, full_range
             )
 
-        # Per-character font fallback for non-ASCII characters
+        # Per-character font fallback for symbols/PUA that the font cascade
+        # may not cover. Skip Latin Extended / Vietnamese (U+0080–U+1FFF) since
+        # the cascade list already handles those correctly without width drift.
         if primary_font:
             ns_pos = 0
             for ch in text:
-                ch_len = len(ch.encode("utf-16-le")) // 2  # UTF-16 code units
-                if ord(ch) > 0x7E:
+                ch_len = 2 if ord(ch) > 0xFFFF else 1  # UTF-16 code units
+                if ord(ch) >= 0x2000:
                     fallback = CTFontCreateForString(
                         primary_font, ch, CFRangeMake(0, len(ch))
                     )
@@ -152,11 +155,12 @@ def draw_backgrounds(
 ) -> None:
     """Pass 1: fill background rectangles, batching adjacent same-color cells."""
     try:
-        from AppKit import NSBezierPath  # type: ignore[import]
         import AppKit  # type: ignore[import]
+        from AppKit import NSBezierPath  # type: ignore[import]
 
         run_start = 0
         run_color = None
+        run_color_key = None
 
         def _flush(end: int) -> None:
             if run_color is not None:
@@ -169,12 +173,16 @@ def draw_backgrounds(
 
         for i, cell in enumerate(cells):
             _, bg = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
+            # Use (fg, bg, reverse) tuple as color key to avoid expensive str() conversion
+            bg_key = (cell.fg, cell.bg, cell.reverse)
             if run_color is None:
                 run_color = bg
+                run_color_key = bg_key
                 run_start = i
-            elif str(bg) != str(run_color):
+            elif bg_key != run_color_key:
                 _flush(i)
                 run_color = bg
+                run_color_key = bg_key
                 run_start = i
         _flush(len(cells))
     except Exception:
@@ -218,10 +226,9 @@ def _draw_glyphs_ctline(
     translating to the row bottom and flipping y once per row.
     """
     try:
-        from AppKit import NSGraphicsContext  # type: ignore[import]
-        import AppKit  # type: ignore[import]
-        from CoreText import CTLineCreateWithAttributedString, CTLineDraw  # type: ignore[import]
         import Quartz  # type: ignore[import]
+        from AppKit import NSGraphicsContext  # type: ignore[import]
+        from CoreText import CTLineCreateWithAttributedString, CTLineDraw  # type: ignore[import]
 
         ctx = NSGraphicsContext.currentContext()
         if ctx is None:
@@ -349,16 +356,22 @@ def _draw_glyphs_percell(
     text layout origin (top-left). We offset by leading so text fills the
     cell correctly: ascender at top, descender at bottom.
     """
-    global _GLYPH_CACHE_THEME_ID
+    global _GLYPH_CACHE_THEME_KEY
 
     try:
-        from AppKit import NSAttributedString  # type: ignore[import]
         import AppKit  # type: ignore[import]
+        from AppKit import NSAttributedString  # type: ignore[import]
 
-        theme_id = id(theme)
-        if theme_id != _GLYPH_CACHE_THEME_ID:
+        # Content-based theme check: only clear cache when theme values change
+        theme_key = (
+            theme.get("foreground"),
+            theme.get("background"),
+            theme.get("cursor"),
+            tuple(theme.get("ansi", ())),
+        )
+        if theme_key != _GLYPH_CACHE_THEME_KEY:
             _GLYPH_CACHE.clear()
-            _GLYPH_CACHE_THEME_ID = theme_id
+            _GLYPH_CACHE_THEME_KEY = theme_key
 
         skip_next = False
         for i, cell in enumerate(cells):
@@ -384,7 +397,10 @@ def _draw_glyphs_percell(
                     ch, attrs
                 )
                 if len(_GLYPH_CACHE) >= _GLYPH_CACHE_MAX:
-                    _GLYPH_CACHE.clear()
+                    # Evict oldest half instead of clearing entire cache
+                    evict = _GLYPH_CACHE_MAX // 2
+                    for _ in range(evict):
+                        _GLYPH_CACHE.pop(next(iter(_GLYPH_CACHE)))
                 _GLYPH_CACHE[cache_key] = attr_str
 
             # In flipped view, drawAtPoint_ y = top of text layout area.
@@ -412,8 +428,8 @@ def draw_decorations(
     Underline: just below baseline. Strikethrough: ~mid-height of x-height.
     """
     try:
-        from AppKit import NSBezierPath  # type: ignore[import]
         import AppKit  # type: ignore[import]
+        from AppKit import NSBezierPath  # type: ignore[import]
 
         # baseline_offset = descender (distance from cell bottom to baseline)
         # In flipped coords: baseline_y = y + (cell_h - baseline)
