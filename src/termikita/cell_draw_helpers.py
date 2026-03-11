@@ -91,6 +91,57 @@ def invalidate_glyph_cache() -> None:
     _PUA_RESOLVE_CACHE.clear()
 
 
+def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) -> object:
+    """Build NSAttributedString with per-character font fallback for non-ASCII.
+
+    For ASCII chars, uses the primary font directly. For non-ASCII chars,
+    queries CoreText for the best font via CTFontCreateForString. This ensures
+    characters not in the primary font (Unicode symbols, Braille, etc.) render
+    correctly instead of showing '??' replacement glyphs.
+    """
+    try:
+        import AppKit  # type: ignore[import]
+        from Foundation import NSMutableAttributedString, NSMakeRange  # type: ignore[import]
+        from CoreText import CTFontCreateForString  # type: ignore[import]
+        from CoreFoundation import CFRangeMake  # type: ignore[import]
+
+        mut_str = NSMutableAttributedString.alloc().initWithString_(text)
+        full_range = NSMakeRange(0, len(text))
+        mut_str.addAttribute_value_range_(
+            AppKit.NSForegroundColorAttributeName, fg_color, full_range
+        )
+        if primary_font:
+            mut_str.addAttribute_value_range_(
+                AppKit.NSFontAttributeName, primary_font, full_range
+            )
+
+        # Per-character font fallback for non-ASCII characters
+        if primary_font:
+            ns_pos = 0
+            for ch in text:
+                ch_len = len(ch.encode("utf-16-le")) // 2  # UTF-16 code units
+                if ord(ch) > 0x7E:
+                    fallback = CTFontCreateForString(
+                        primary_font, ch, CFRangeMake(0, len(ch))
+                    )
+                    if fallback and fallback.fontName() != primary_font.fontName():
+                        char_range = NSMakeRange(ns_pos, ch_len)
+                        mut_str.addAttribute_value_range_(
+                            AppKit.NSFontAttributeName, fallback, char_range
+                        )
+                ns_pos += ch_len
+
+        return mut_str
+    except Exception:
+        # Fallback: simple attributed string without per-char fallback
+        import AppKit  # type: ignore[import]
+        from AppKit import NSAttributedString  # type: ignore[import]
+        attrs: dict = {AppKit.NSForegroundColorAttributeName: fg_color}
+        if primary_font:
+            attrs[AppKit.NSFontAttributeName] = primary_font
+        return NSAttributedString.alloc().initWithString_attributes_(text, attrs)
+
+
 def draw_backgrounds(
     cells: list[CellData],
     y: float,
@@ -167,7 +218,7 @@ def _draw_glyphs_ctline(
     translating to the row bottom and flipping y once per row.
     """
     try:
-        from AppKit import NSAttributedString, NSGraphicsContext  # type: ignore[import]
+        from AppKit import NSGraphicsContext  # type: ignore[import]
         import AppKit  # type: ignore[import]
         from CoreText import CTLineCreateWithAttributedString, CTLineDraw  # type: ignore[import]
         import Quartz  # type: ignore[import]
@@ -202,14 +253,10 @@ def _draw_glyphs_ctline(
             bold, italic, fg_key, bg_key, reverse = style_key
             font = fonts.get((bold, italic)) or fonts.get((False, False))
             fg, _ = resolve_cell_colors(fg_key, bg_key, reverse, theme)
-            attrs: dict = {AppKit.NSForegroundColorAttributeName: fg}
-            if font:
-                attrs[AppKit.NSFontAttributeName] = font
 
-            # Create CTLine and draw at grid position
-            attr_str = NSAttributedString.alloc().initWithString_attributes_(
-                run_text, attrs
-            )
+            # Build attributed string with per-character font fallback
+            # for non-ASCII chars that might not be in the primary font.
+            attr_str = _build_fallback_attr_str(run_text, font, fg)
             ct_line = CTLineCreateWithAttributedString(attr_str)
             run_x = x_offset + start_col * cell_w
             # In the flipped context: y=0 is row bottom, baseline is up from bottom
@@ -254,6 +301,12 @@ def _group_into_style_runs(
         if _is_wide_char(ch):
             runs.append((i, i + 1, style))
             i += 2  # skip shadow cell
+            continue
+
+        # PUA chars: isolate to prevent grid displacement when no Nerd Font
+        if _is_pua_char(ch):
+            runs.append((i, i + 1, style))
+            i += 1
             continue
 
         # Start a run of regular chars with same style

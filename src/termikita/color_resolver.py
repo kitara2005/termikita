@@ -56,10 +56,14 @@ def resolve_cell_colors(
     Returns:
         (fg_NSColor, bg_NSColor) pair.
     """
-    if reverse:
-        fg_raw, bg_raw = bg_raw, fg_raw
+    # Resolve colors FIRST, then swap for reverse video.
+    # Swapping raw "default"/"default" strings before resolving has no effect
+    # because resolve_color("default", is_fg=True) always returns theme foreground.
+    # By resolving first, reverse video correctly shows fg-as-bg and bg-as-fg.
     fg_color = resolve_color(fg_raw, is_fg=True, theme=theme)
     bg_color = resolve_color(bg_raw, is_fg=False, theme=theme)
+    if reverse:
+        return bg_color, fg_color
     return fg_color, bg_color
 
 
