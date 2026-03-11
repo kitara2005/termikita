@@ -243,6 +243,40 @@ class BufferManager:
         c = self._screen.cursor
         return (c.y, c.x, not self._cursor_hidden)
 
+    def find_visual_cursor_for_ime(self) -> tuple[int, int]:
+        """Find visual cursor position for IME marked text placement.
+
+        TUI frameworks (e.g. Ink used by Claude Code) render a visual cursor
+        as a styled buffer character but place the actual terminal cursor rows
+        below the input area.  When the cursor row is blank, scan upward to
+        find the last row with visible content and position after its rightmost
+        non-blank character.
+        """
+        row, col, _ = self.get_cursor()
+        try:
+            buf = self._screen.buffer
+            # Cursor row has content → trust real position
+            row_data = buf[row]
+            if row_data and any(
+                c.data.strip() for c in row_data.values() if hasattr(c, "data")
+            ):
+                return (row, col)
+            # Scan upward for last content row
+            for r in range(row - 1, max(row - 20, -1), -1):
+                rd = buf[r]
+                if not rd:
+                    continue
+                if any(c.data.strip() for c in rd.values() if hasattr(c, "data")):
+                    last_col = max(
+                        (ci + 1 for ci, ch in rd.items()
+                         if hasattr(ch, "data") and ch.data.strip()),
+                        default=0,
+                    )
+                    return (r, min(last_col, self.columns - 1))
+        except Exception:
+            pass
+        return (row, col)
+
     @property
     def cursor_style(self) -> str:
         """Current cursor shape: 'block', 'underline', or 'beam'."""

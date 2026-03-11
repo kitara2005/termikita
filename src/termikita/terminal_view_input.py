@@ -78,9 +78,10 @@ class TerminalViewInputMixin:
         """Return screen rect for IME candidate window placement near cursor."""
         from Foundation import NSMakeRect  # type: ignore[import]
 
-        cursor_row, cursor_col, _ = self._session.buffer.get_cursor()
-        x = TERMINAL_PADDING_X + cursor_col * self._renderer.cell_width
-        y = TERMINAL_PADDING_Y + cursor_row * self._renderer.cell_height
+        # Use visual cursor heuristic so TUI apps (Ink) get correct placement
+        ime_row, ime_col = self._session.buffer.find_visual_cursor_for_ime()
+        x = TERMINAL_PADDING_X + ime_col * self._renderer.cell_width
+        y = TERMINAL_PADDING_Y + ime_row * self._renderer.cell_height
         rect = NSMakeRect(x, y, 0, self._renderer.cell_height)
         try:
             window_rect = self.convertRect_toView_(rect, None)

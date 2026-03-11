@@ -101,10 +101,13 @@ class TerminalViewDrawMixin:
         if self._selection_start and self._selection_end:
             self._draw_selection_highlight(self.bounds())
 
-        # Draw IME composition overlay at terminal cursor position.
+        # Draw IME composition overlay — use visual cursor heuristic so that
+        # TUI apps (Ink/Claude Code) that place the real cursor below the
+        # input area still get marked text at the right position.
         if self._marked_text:
+            ime_row, ime_col = self._session.buffer.find_visual_cursor_for_ime()
             self._renderer.draw_marked_text(
-                context, self._marked_text, cursor_col, cursor_row,
+                context, self._marked_text, ime_col, ime_row,
                 self._theme_colors, x_offset=px, y_offset=py,
             )
 
