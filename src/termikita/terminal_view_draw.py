@@ -34,9 +34,6 @@ from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
 class TerminalViewDrawMixin:
     """Drawing, timers, resize, and scroll helpers for TerminalView."""
 
-    # Row content hashes from previous draw — used to skip unchanged rows.
-    # Reset on resize or scroll (via setNeedsDisplay_ full redraw).
-    _prev_row_hashes: list = []
 
     # ------------------------------------------------------------------
     # drawRect_ — partial redraw: only rows intersecting dirty rect
@@ -77,20 +74,8 @@ class TerminalViewDrawMixin:
         first_row = max(0, int((rect.origin.y - py) / ch))
         last_row = min(len(lines), int((rect.origin.y - py + rect.size.height) / ch) + 1)
 
-        # Grow hash list to match row count (list may be empty on first draw)
-        total_rows = len(lines)
-        if len(self._prev_row_hashes) != total_rows:
-            self._prev_row_hashes = [None] * total_rows
-
         for row_idx in range(first_row, last_row):
             cells = lines[row_idx]
-            # Hash row content: skip redraw if unchanged since last frame
-            row_hash = hash(
-                tuple((c.char, c.fg, c.bg, c.bold, c.italic, c.reverse) for c in cells)
-            )
-            if self._prev_row_hashes[row_idx] == row_hash:
-                continue  # unchanged row — skip draw call
-            self._prev_row_hashes[row_idx] = row_hash
             self._renderer.draw_line(
                 context, py + row_idx * ch, cells, self._theme_colors, x_offset=px
             )
@@ -116,10 +101,11 @@ class TerminalViewDrawMixin:
         if self._selection_start and self._selection_end:
             self._draw_selection_highlight(self.bounds())
 
+        # Draw IME composition overlay at terminal cursor position.
         if self._marked_text:
             self._renderer.draw_marked_text(
-                context, self._marked_text, cursor_col, cursor_row, self._theme_colors,
-                x_offset=px, y_offset=py,
+                context, self._marked_text, cursor_col, cursor_row,
+                self._theme_colors, x_offset=px, y_offset=py,
             )
 
     def _draw_selection_highlight(self, bounds: object) -> None:
@@ -157,8 +143,6 @@ class TerminalViewDrawMixin:
             self._session.buffer.scroll_up(max(1, int(delta * 3)))
         elif delta < 0:
             self._session.buffer.scroll_down(max(1, int(abs(delta) * 3)))
-        # Viewport content changed — reset row hash cache for full redraw
-        self._prev_row_hashes = []
         self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
@@ -212,8 +196,6 @@ class TerminalViewDrawMixin:
 
         py = TERMINAL_PADDING_Y
         if dirty_rows is None:
-            # Full redraw — invalidate row hash cache so all rows are redrawn
-            self._prev_row_hashes = []
             self.setNeedsDisplay_(True)
             session.buffer.clear_dirty()
         elif dirty_rows or cursor_moved:

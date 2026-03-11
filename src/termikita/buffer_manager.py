@@ -40,6 +40,13 @@ _CURSOR_STYLE_MAP = {
 _DECTCEM_SHOW_RE = re.compile(r"\x1b\[\?25h")
 _DECTCEM_HIDE_RE = re.compile(r"\x1b\[\?25l")
 
+# ANSI SCO save/restore cursor: ESC[s / ESC[u
+# Pyte only supports DEC save/restore (ESC7/ESC8). Ink (Claude Code) uses
+# SCO save/restore to position the cursor at the visual input point for IME.
+# Convert SCO → DEC so pyte tracks cursor position correctly.
+_SCO_SAVE_RE = re.compile(r"\x1b\[s")
+_SCO_RESTORE_RE = re.compile(r"\x1b\[u")
+
 
 class CellData(NamedTuple):
     """Immutable per-cell data for the renderer layer (Phase 04+)."""
@@ -169,6 +176,11 @@ class BufferManager:
         # OSC 8 hyperlink tracking
         self._osc8_current_url = _last_osc8_url(text, self._osc8_current_url)
         self._screen._osc8_current_url = self._osc8_current_url
+
+        # Convert ANSI SCO save/restore cursor (ESC[s/ESC[u) to DEC (ESC7/ESC8)
+        # so pyte tracks cursor position from Ink's cursor marker system.
+        text = _SCO_SAVE_RE.sub("\x1b7", text)
+        text = _SCO_RESTORE_RE.sub("\x1b8", text)
 
         self._stream.feed(text)
         self._visible_cache_valid = False

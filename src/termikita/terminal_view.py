@@ -23,6 +23,11 @@ from AppKit import (  # type: ignore[import]
 )
 from Foundation import NSNotFound  # type: ignore[import]
 
+# Protocol conformance required for macOS text input system (IME composition).
+# Without this, inputContext() returns None and Vietnamese Telex/VNI keyboards
+# fall back to raw character input instead of composition events.
+NSTextInputClient = objc.protocolNamed("NSTextInputClient")
+
 from termikita.constants import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
@@ -52,7 +57,7 @@ DEFAULT_THEME: dict = {
 }
 
 
-class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
+class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protocols=[NSTextInputClient]):
     """Interactive terminal NSView with IME, selection, and 60 fps rendering."""
 
     # ------------------------------------------------------------------
@@ -287,11 +292,9 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
                         return
                 # Other special keys: commit marked text then send the key.
                 if self._marked_text:
-                    # NFC normalize Vietnamese marked text before sending to PTY
                     self._session.write(normalize_text(self._marked_text).encode("utf-8"))
                 self._marked_text = None
                 self._marked_range = (NSNotFound, 0)
-                # Tell input context composition is done
                 ic = self.inputContext()
                 if ic:
                     ic.discardMarkedText()

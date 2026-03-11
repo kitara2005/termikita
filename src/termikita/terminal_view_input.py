@@ -33,30 +33,21 @@ class TerminalViewInputMixin:
     # ------------------------------------------------------------------
 
     def insertText_replacementRange_(self, string: object, replacementRange: object) -> None:
-        """IME commits final composed text, or regular key character input.
-
-        Marked text (composition preview) is never sent to PTY, so no
-        backspaces needed — just clear composition state and send the
-        final committed text.
-        """
-        # Extract plain text from NSString or NSAttributedString
+        """IME commits final composed text, or regular key character input."""
         text = string.string() if hasattr(string, "string") else str(string)
         text = str(text) if text else ""
 
-        # Clear composition state unconditionally — MUST happen before PTY write
         self._marked_text = None
         self._marked_range = (NSNotFound, 0)
 
         if text:
-            # NFC normalize so Vietnamese diacritics are precomposed before PTY
             self._session.write(normalize_text(text).encode("utf-8"))
         self.setNeedsDisplay_(True)
 
     def setMarkedText_selectedRange_replacementRange_(
         self, string: object, selRange: object, replRange: object
     ) -> None:
-        """Called while IME is composing — display but do NOT send to PTY."""
-        # Extract plain text from NSString or NSAttributedString
+        """Called while IME is composing — store for overlay display."""
         text = string.string() if hasattr(string, "string") else str(string) if string else None
         self._marked_text = str(text) if text else None
         if self._marked_text:
