@@ -72,7 +72,9 @@ def _resolve_pua_char(ch: str, primary_font: object) -> tuple[str, object]:
         from CoreFoundation import CFRangeMake  # type: ignore[import]
         from CoreText import CTFontCreateForString  # type: ignore[import]
 
-        fallback = CTFontCreateForString(primary_font, ch, CFRangeMake(0, len(ch)))
+        # Use UTF-16 length: supplementary PUA chars (U+F0000+) need 2 code units
+        utf16_len = 2 if ord(ch) > 0xFFFF else 1
+        fallback = CTFontCreateForString(primary_font, ch, CFRangeMake(0, utf16_len))
         if fallback and fallback.fontName() != primary_font.fontName():
             # A different font can render this glyph
             result = (ch, fallback)
@@ -114,7 +116,9 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
         from Foundation import NSMakeRange, NSMutableAttributedString  # type: ignore[import]
 
         mut_str = NSMutableAttributedString.alloc().initWithString_(text)
-        full_range = NSMakeRange(0, len(text))
+        # Use NSString length (UTF-16 code units), not Python len (codepoints).
+        # Supplementary plane chars (emoji U+1F000+) are 2 UTF-16 units each.
+        full_range = NSMakeRange(0, mut_str.length())
         mut_str.addAttribute_value_range_(
             AppKit.NSForegroundColorAttributeName, fg_color, full_range
         )
@@ -136,9 +140,11 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
                     cache_key = (cp, font_id)
                     fallback = _FONT_FALLBACK_CACHE.get(cache_key)
                     if fallback is None:
-                        # Cache miss — call CoreText and store result
+                        # Cache miss — call CoreText and store result.
+                        # Use ch_len (UTF-16 units) not len(ch) (Python codepoints)
+                        # so supplementary plane chars resolve to Apple Color Emoji.
                         resolved = CTFontCreateForString(
-                            primary_font, ch, CFRangeMake(0, len(ch))
+                            primary_font, ch, CFRangeMake(0, ch_len)
                         )
                         if resolved and resolved.fontName() != primary_font.fontName():
                             fallback = resolved

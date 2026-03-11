@@ -120,7 +120,9 @@ def _find_fallback_font(primary_font: object, char: str) -> object:
         from CoreText import CTFontCreateForString  # type: ignore[import]
         from CoreFoundation import CFRangeMake  # type: ignore[import]
 
-        result = CTFontCreateForString(primary_font, char, CFRangeMake(0, len(char)))
+        # Use UTF-16 length: supplementary plane chars (emoji, ext-PUA) need 2 units
+        utf16_len = 2 if ord(char) > 0xFFFF else 1
+        result = CTFontCreateForString(primary_font, char, CFRangeMake(0, utf16_len))
         return result if result else primary_font
     except Exception:
         return primary_font
