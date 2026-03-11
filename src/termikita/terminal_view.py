@@ -278,8 +278,14 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         keycode = event.keyCode()
         if keycode in KEY_MAP:
             if self.hasMarkedText():
-                # Commit the in-progress IME text to PTY (e.g. Vietnamese "việ")
-                # before sending the special key. unmarkText() alone would DISCARD it.
+                # Backspace during composition: let IME shorten the marked text
+                # (e.g. "việ" + backspace → "vi") instead of committing + sending DEL.
+                if keycode == 0x33:  # Backspace
+                    ic = self.inputContext()
+                    if ic:
+                        ic.handleEvent_(event)
+                        return
+                # Other special keys: commit marked text then send the key.
                 if self._marked_text:
                     # NFC normalize Vietnamese marked text before sending to PTY
                     self._session.write(normalize_text(self._marked_text).encode("utf-8"))
@@ -296,7 +302,12 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
         if ic:
             ic.handleEvent_(event)
         else:
-            self.interpretKeyEvents_([event])
+            # interpretKeyEvents_ bypasses IME composition — only safe for ASCII.
+            # When inputContext is None, send characters directly to PTY with
+            # NFC normalization instead (avoids character loss for Vietnamese).
+            chars = event.characters()
+            if chars:
+                self._session.write(normalize_text(str(chars)).encode("utf-8"))
 
     def doCommandBySelector_(self, selector: object) -> None:
         pass

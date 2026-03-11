@@ -10,6 +10,7 @@ Wraps pyte.Screen/Stream with:
 
 from __future__ import annotations
 
+import codecs
 import collections
 import re
 from typing import NamedTuple
@@ -124,13 +125,20 @@ class BufferManager:
         self._cursor_style: str = "block"      # DECSCUSR cursor shape (default=block)
         self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
         self._force_full_redraw: bool = True   # first frame needs full draw
+        self._has_new_output: bool = False     # set True in feed(), cleared by renderer
+        # Incremental UTF-8 decoder — buffers incomplete multi-byte sequences
+        # across os.read() boundaries instead of replacing them with U+FFFD
+        self._utf8_decoder = codecs.getincrementaldecoder("utf-8")("ignore")
+        # Visible lines cache — avoids recreating 1920+ NamedTuples per frame
+        self._visible_cache: list[list[CellData]] | None = None
+        self._visible_cache_valid: bool = False
 
     # ------------------------------------------------------------------
     # Feed raw PTY bytes
     # ------------------------------------------------------------------
     def feed(self, data: bytes) -> None:
         """Decode → NFC-normalize → OSC 8/DEC 2026 pre-scan → pyte parse."""
-        text = data.decode("utf-8", errors="replace")
+        text = self._utf8_decoder.decode(data, False)
         text = normalize_text(text)  # NFC for Vietnamese diacritics
 
         # DEC 2026 synchronized output detection
@@ -163,25 +171,41 @@ class BufferManager:
         self._screen._osc8_current_url = self._osc8_current_url
 
         self._stream.feed(text)
+        self._visible_cache_valid = False
+        self._has_new_output = True
 
     # ------------------------------------------------------------------
     # Visible lines (live or scrollback + screen mix)
     # ------------------------------------------------------------------
     def get_visible_lines(self) -> list[list[CellData]]:
-        """Return viewport lines for current scroll position."""
+        """Return viewport lines for current scroll position (cached)."""
+        if self._visible_cache_valid and self._visible_cache is not None:
+            return self._visible_cache
+
         rows = self._screen.lines
         if self._scroll_offset == 0:
-            return [self._screen.capture_line(r) for r in range(rows)]
+            # Reuse existing cache list structure if size matches — avoids
+            # allocating a new list object every frame under streaming output.
+            if self._visible_cache is not None and len(self._visible_cache) == rows:
+                result = self._visible_cache
+                for r in range(rows):
+                    result[r] = self._screen.capture_line(r)
+            else:
+                result = [self._screen.capture_line(r) for r in range(rows)]
+        else:
+            sb = list(self._scrollback)          # oldest → newest
+            sb_start = max(0, len(sb) - self._scroll_offset)
+            window = sb[sb_start : sb_start + rows]
+            if len(window) >= rows:
+                result = window[:rows]
+            else:
+                # Pad with top screen lines if scrollback window shorter than viewport
+                result = list(window)
+                for r in range(rows - len(window)):
+                    result.append(self._screen.capture_line(r))
 
-        sb = list(self._scrollback)          # oldest → newest
-        sb_start = max(0, len(sb) - self._scroll_offset)
-        window = sb[sb_start : sb_start + rows]
-        if len(window) >= rows:
-            return window[:rows]
-        # Pad with top screen lines if scrollback window shorter than viewport
-        result = list(window)
-        for r in range(rows - len(window)):
-            result.append(self._screen.capture_line(r))
+        self._visible_cache = result
+        self._visible_cache_valid = True
         return result
 
     # ------------------------------------------------------------------
@@ -234,14 +258,17 @@ class BufferManager:
     def scroll_up(self, lines: int = 3) -> None:
         self._scroll_offset = min(self._scroll_offset + lines, len(self._scrollback))
         self._force_full_redraw = True
+        self._visible_cache_valid = False
 
     def scroll_down(self, lines: int = 3) -> None:
         self._scroll_offset = max(0, self._scroll_offset - lines)
         self._force_full_redraw = True
+        self._visible_cache_valid = False
 
     def scroll_to_bottom(self) -> None:
         self._scroll_offset = 0
         self._force_full_redraw = True
+        self._visible_cache_valid = False
 
     # ------------------------------------------------------------------
     # Resize
@@ -251,10 +278,22 @@ class BufferManager:
         self._screen.resize(rows, cols)
         self._scroll_offset = 0
         self._force_full_redraw = True
+        self._visible_cache_valid = False
 
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
+    @property
+    def has_new_output(self) -> bool:
+        """True if PTY data arrived since last consume_new_output() call."""
+        return self._has_new_output
+
+    def consume_new_output(self) -> bool:
+        """Read and clear has_new_output flag. Returns True if new data arrived."""
+        had_output = self._has_new_output
+        self._has_new_output = False
+        return had_output
+
     @property
     def dirty(self) -> bool:
         return bool(self._screen.dirty) or self._force_full_redraw
