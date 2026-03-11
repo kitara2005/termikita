@@ -15,18 +15,27 @@ Drawing uses isFlipped=True (top-left origin) so row 0 is at y=0.
 from __future__ import annotations
 
 import objc  # type: ignore[import]
-from AppKit import NSView, NSCursor, NSEventModifierFlagCommand, NSEventModifierFlagControl  # type: ignore[import]
+from AppKit import (  # type: ignore[import]
+    NSCursor,
+    NSEventModifierFlagCommand,
+    NSEventModifierFlagControl,
+    NSView,
+)
 from Foundation import NSNotFound  # type: ignore[import]
 
-from termikita.terminal_session import TerminalSession
-from termikita.text_renderer import TextRenderer
-from termikita.terminal_view_draw import TerminalViewDrawMixin
-from termikita.terminal_view_input import TerminalViewInputMixin
-from termikita.input_handler import KEY_MAP
 from termikita.constants import (
-    DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_PADDING_X, TERMINAL_PADDING_Y,
+    DEFAULT_COLS,
+    DEFAULT_ROWS,
+    TERMINAL_PADDING_X,
+    TERMINAL_PADDING_Y,
     get_font_smoothing_enabled,
 )
+from termikita.input_handler import KEY_MAP
+from termikita.terminal_session import TerminalSession
+from termikita.unicode_utils import normalize_text
+from termikita.terminal_view_draw import TerminalViewDrawMixin
+from termikita.terminal_view_input import TerminalViewInputMixin
+from termikita.text_renderer import TextRenderer
 
 # Default theme — Phase 07 will load from JSON
 DEFAULT_THEME: dict = {
@@ -142,9 +151,12 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
             return
         new_cols = max(1, int((newSize.width - TERMINAL_PADDING_X * 2) / cw))
         new_rows = max(1, int((newSize.height - TERMINAL_PADDING_Y * 2) / ch))
+        # Only resize PTY/buffer when grid dimensions actually change.
+        # setFrameSize_ fires for every pixel of window drag — skipping no-op
+        # resizes avoids expensive pyte.Screen.resize() + SIGWINCH on each pixel.
         if hasattr(self, "_session") and self._session:
-            self._session.resize(new_cols, new_rows)
-        self._back_buffer = None
+            if new_cols != self._session.cols or new_rows != self._session.rows:
+                self._session.resize(new_cols, new_rows)
         self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
@@ -262,11 +274,21 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin):
                     self._session.write(bytes([ord(ch) - ord("a") + 1]))
                     return
         # Special keys (Return, Tab, Backspace, arrows) ALWAYS go directly to PTY.
-        # If IME is composing, commit/cancel marked text first.
+        # If IME is composing, COMMIT composed text first, then send the special key.
         keycode = event.keyCode()
         if keycode in KEY_MAP:
             if self.hasMarkedText():
-                self.unmarkText()
+                # Commit the in-progress IME text to PTY (e.g. Vietnamese "việ")
+                # before sending the special key. unmarkText() alone would DISCARD it.
+                if self._marked_text:
+                    # NFC normalize Vietnamese marked text before sending to PTY
+                    self._session.write(normalize_text(self._marked_text).encode("utf-8"))
+                self._marked_text = None
+                self._marked_range = (NSNotFound, 0)
+                # Tell input context composition is done
+                ic = self.inputContext()
+                if ic:
+                    ic.discardMarkedText()
             self._session.write(KEY_MAP[keycode])
             return
         # Route through NSTextInputContext for proper IME composition lifecycle.

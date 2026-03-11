@@ -7,13 +7,14 @@ window resize signals, and clean shutdown without zombie processes.
 import fcntl
 import os
 import pty
+import select
 import signal
 import struct
 import termios
 import threading
 from typing import Callable, Optional
 
-from termikita.constants import DEFAULT_COLORTERM, DEFAULT_TERM
+from termikita.constants import DEFAULT_COLORTERM, DEFAULT_TERM, PTY_READ_CHUNK_SIZE
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
@@ -81,12 +82,17 @@ class PTYManager:
     def write(self, data: bytes) -> None:
         """Write raw bytes (user input) to the PTY master fd.
 
+        Handles short writes to prevent split UTF-8 sequences (e.g. Vietnamese
+        characters like "ả" = 3 UTF-8 bytes could be partially written).
         No-op if the session is no longer alive.
         """
         if not self._running or self._master_fd is None:
             return
         try:
-            os.write(self._master_fd, data)
+            mv = memoryview(data)
+            while mv:
+                written = os.write(self._master_fd, mv)
+                mv = mv[written:]
         except OSError:
             # PTY already closed; ignore silently
             pass
@@ -215,6 +221,8 @@ class PTYManager:
     def _read_loop(self) -> None:
         """Background thread: read PTY output and deliver to on_output callback.
 
+        Coalesces multiple ready chunks into a single callback invocation to
+        reduce per-feed overhead (regex scans, NFC normalization, pyte parsing).
         Exits when the master fd is closed (OSError) or _running is False.
         """
         while self._running:
@@ -222,9 +230,21 @@ class PTYManager:
             if fd is None:
                 break
             try:
-                data = os.read(fd, 4096)
+                data = os.read(fd, PTY_READ_CHUNK_SIZE)
                 if not data:
                     break
+                # Coalesce: drain any additional ready data without blocking
+                while True:
+                    r, _, _ = select.select([fd], [], [], 0)
+                    if not r:
+                        break
+                    try:
+                        more = os.read(fd, PTY_READ_CHUNK_SIZE)
+                        if not more:
+                            break
+                        data += more
+                    except (OSError, TypeError):
+                        break
                 self._on_output(data)
             except (OSError, TypeError):
                 # fd closed (shutdown) or child exited — both are normal exits.

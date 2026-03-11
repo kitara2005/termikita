@@ -17,6 +17,7 @@ from AppKit import (  # type: ignore[import]
 from Foundation import NSNotFound, NSMakeRange  # type: ignore[import]
 
 from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
+from termikita.unicode_utils import normalize_text
 
 
 class TerminalViewInputMixin:
@@ -47,7 +48,8 @@ class TerminalViewInputMixin:
         self._marked_range = (NSNotFound, 0)
 
         if text:
-            self._session.write(text.encode("utf-8"))
+            # NFC normalize so Vietnamese diacritics are precomposed before PTY
+            self._session.write(normalize_text(text).encode("utf-8"))
         self.setNeedsDisplay_(True)
 
     def setMarkedText_selectedRange_replacementRange_(
@@ -173,7 +175,8 @@ class TerminalViewInputMixin:
             pb = NSPasteboard.generalPasteboard()
             text = pb.stringForType_(NSPasteboardTypeString)
             if text:
-                self._session.write(str(text).encode("utf-8"))
+                # NFC normalize pasted Vietnamese text to match buffer normalization
+                self._session.write(normalize_text(str(text)).encode("utf-8"))
         except Exception:
             pass
 
