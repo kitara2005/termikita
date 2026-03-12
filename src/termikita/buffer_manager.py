@@ -100,16 +100,23 @@ class TermikitaScreen(pyte.Screen):
         # Both fields injected / updated by BufferManager
         self._scrollback: collections.deque = collections.deque()
         self._osc8_current_url: str | None = None
+        self._resizing: bool = False  # True during pyte.Screen.resize()
 
     @property
     def in_alternate_screen(self) -> bool:
         return _DECSET_1049 in self.mode
 
+    def resize(self, lines: int = 24, columns: int = 80) -> None:
+        """Wrap pyte resize to suppress scrollback capture during resize."""
+        self._resizing = True
+        super().resize(lines, columns)
+        self._resizing = False
+
     def index(self) -> None:  # type: ignore[override]
         """Capture departing top line into scrollback, then scroll.
-        Skip capture when in alternate screen (TUI apps manage their own buffer)."""
+        Skip during resize (prevents duplicate prompts) and alternate screen."""
         top, _ = self.margins or _Margins(0, self.lines - 1)
-        if top == 0 and not self.in_alternate_screen:
+        if top == 0 and not self.in_alternate_screen and not self._resizing:
             self._scrollback.append(self.capture_line(0))
         super().index()
 
