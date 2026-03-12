@@ -156,29 +156,32 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
             return
         new_cols = max(1, int((newSize.width - TERMINAL_PADDING_X * 2) / cw))
         new_rows = max(1, int((newSize.height - TERMINAL_PADDING_Y * 2) / ch))
-        # Resize buffer immediately for correct rendering; debounce PTY SIGWINCH
-        # so the shell only redraws once after the user stops dragging.
+        # Debounce full resize (buffer + PTY) so pyte.Screen.resize() and
+        # SIGWINCH only fire once after the user stops dragging. This prevents
+        # pyte from scrolling content during intermediate sizes which causes
+        # duplicate prompt lines in scrollback.
         if hasattr(self, "_session") and self._session:
             if new_cols != self._session.cols or new_rows != self._session.rows:
-                self._session.resize(new_cols, new_rows)
-                self._schedule_pty_resize(new_cols, new_rows)
+                self._schedule_resize(new_cols, new_rows)
         self.setNeedsDisplay_(True)
 
-    def _schedule_pty_resize(self, cols: int, rows: int) -> None:
-        """Debounce PTY resize — only send SIGWINCH 150ms after last change."""
+    def _schedule_resize(self, cols: int, rows: int) -> None:
+        """Debounce full resize — buffer + PTY fire 100ms after last change."""
         if hasattr(self, "_resize_timer") and self._resize_timer:
             self._resize_timer.invalidate()
-        self._pending_pty_cols = cols
-        self._pending_pty_rows = rows
+        self._pending_cols = cols
+        self._pending_rows = rows
         self._resize_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            0.15, self, b"_firePtyResize:", None, False
+            0.1, self, b"_fireResize:", None, False
         )
 
-    def _firePtyResize_(self, timer: object) -> None:
-        """Timer callback — send debounced SIGWINCH to the shell."""
+    def _fireResize_(self, timer: object) -> None:
+        """Timer callback — resize buffer and send SIGWINCH once."""
         self._resize_timer = None
         if hasattr(self, "_session") and self._session:
-            self._session.resize_pty(self._pending_pty_cols, self._pending_pty_rows)
+            self._session.resize(self._pending_cols, self._pending_rows)
+            self._session.resize_pty(self._pending_cols, self._pending_rows)
+            self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
     # PyObjC forwarding: drawing + timers (from TerminalViewDrawMixin)
