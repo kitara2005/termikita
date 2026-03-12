@@ -83,11 +83,16 @@ def _pyte_char_to_cell(ch: object, hyperlink: str | None) -> CellData:
     )
 
 
+    # Pyte encodes private modes as mode_num << 5
+_DECSET_1049 = 1049 << 5  # Alternate screen buffer
+
+
 class TermikitaScreen(pyte.Screen):
     """pyte.Screen extended with scrollback capture.
 
     Overrides index() so that every line scrolled off the visible top is
     appended to the shared scrollback deque before pyte discards it.
+    Scrollback is frozen while alternate screen (DECSET 1049) is active.
     """
 
     def __init__(self, columns: int, lines: int) -> None:
@@ -96,10 +101,15 @@ class TermikitaScreen(pyte.Screen):
         self._scrollback: collections.deque = collections.deque()
         self._osc8_current_url: str | None = None
 
+    @property
+    def in_alternate_screen(self) -> bool:
+        return _DECSET_1049 in self.mode
+
     def index(self) -> None:  # type: ignore[override]
-        """Capture departing top line into scrollback, then scroll."""
+        """Capture departing top line into scrollback, then scroll.
+        Skip capture when in alternate screen (TUI apps manage their own buffer)."""
         top, _ = self.margins or _Margins(0, self.lines - 1)
-        if top == 0:
+        if top == 0 and not self.in_alternate_screen:
             self._scrollback.append(self.capture_line(0))
         super().index()
 
@@ -310,6 +320,9 @@ class BufferManager:
     # User scroll controls
     # ------------------------------------------------------------------
     def scroll_up(self, lines: int = 3) -> None:
+        # Disable scrollback when in alternate screen (TUI apps handle scroll themselves)
+        if self._screen.in_alternate_screen:
+            return
         self._scroll_offset = min(self._scroll_offset + lines, len(self._scrollback))
         self._force_full_redraw = True
         self._visible_cache_valid = False
