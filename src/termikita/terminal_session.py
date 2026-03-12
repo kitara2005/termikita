@@ -86,10 +86,13 @@ class TerminalSession:
         self.pty.write(data)
 
     def resize(self, cols: int, rows: int) -> None:
-        """Resize both the buffer grid and the PTY window."""
+        """Resize buffer grid immediately, PTY (SIGWINCH) deferred by caller."""
         self.cols = cols
         self.rows = rows
         self.buffer.resize(cols, rows)
+
+    def resize_pty(self, cols: int, rows: int) -> None:
+        """Send SIGWINCH to the child process. Call after resize settles."""
         self.pty.resize(cols, rows)
 
     def shutdown(self) -> None:
