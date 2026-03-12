@@ -100,11 +100,30 @@ class TermikitaScreen(pyte.Screen):
         # Both fields injected / updated by BufferManager
         self._scrollback: collections.deque = collections.deque()
         self._osc8_current_url: str | None = None
-        self._resizing: bool = False  # True during pyte.Screen.resize()
+        self._resizing: bool = False
+        self._saved_scrollback_len: int | None = None  # saved on alt screen enter
 
     @property
     def in_alternate_screen(self) -> bool:
         return _DECSET_1049 in self.mode
+
+    def set_mode(self, *modes, **kwargs):
+        """Track alternate screen enter — save scrollback length."""
+        prev_alt = self.in_alternate_screen
+        super().set_mode(*modes, **kwargs)
+        if not prev_alt and self.in_alternate_screen:
+            self._saved_scrollback_len = len(self._scrollback)
+
+    def reset_mode(self, *modes, **kwargs):
+        """Track alternate screen exit — truncate scrollback to saved length."""
+        prev_alt = self.in_alternate_screen
+        super().reset_mode(*modes, **kwargs)
+        if prev_alt and not self.in_alternate_screen:
+            if self._saved_scrollback_len is not None:
+                # Remove any scrollback accumulated during alternate screen
+                while len(self._scrollback) > self._saved_scrollback_len:
+                    self._scrollback.pop()
+                self._saved_scrollback_len = None
 
     def resize(self, lines: int = 24, columns: int = 80) -> None:
         """Wrap pyte resize to suppress scrollback capture during resize."""
@@ -114,7 +133,7 @@ class TermikitaScreen(pyte.Screen):
 
     def index(self) -> None:  # type: ignore[override]
         """Capture departing top line into scrollback, then scroll.
-        Skip during resize (prevents duplicate prompts) and alternate screen."""
+        Skip during resize and alternate screen."""
         top, _ = self.margins or _Margins(0, self.lines - 1)
         if top == 0 and not self.in_alternate_screen and not self._resizing:
             self._scrollback.append(self.capture_line(0))
