@@ -82,8 +82,12 @@ class TabController:
     # Public API
     # ------------------------------------------------------------------
 
-    def add_tab(self) -> TabItem:
-        """Create a new terminal tab and make it active."""
+    def add_tab(self, working_dir: str | None = None) -> TabItem:
+        """Create a new terminal tab and make it active.
+
+        Args:
+            working_dir: Optional starting directory for the shell process.
+        """
         renderer = TextRenderer()
         renderer.set_font(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE)
         cols, rows = self._grid_size(renderer)
@@ -94,6 +98,7 @@ class TabController:
             on_output_callback=None,
             on_title_change=self._on_tab_title_change,
             on_exit=self._on_tab_exit,
+            working_dir=working_dir,
         )
 
         from AppKit import NSViewWidthSizable, NSViewHeightSizable  # type: ignore[import]

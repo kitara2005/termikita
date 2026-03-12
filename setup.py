@@ -44,14 +44,23 @@ DATA_FILES = [
 
 OPTIONS = {
     "argv_emulation": False,
+    "iconfile": "assets/Termikita.icns",
     "plist": {
         "CFBundleName": "Termikita",
         "CFBundleDisplayName": "Termikita",
         "CFBundleIdentifier": "com.termikita.app",
-        "CFBundleVersion": "0.1.1",
-        "CFBundleShortVersionString": "0.1.1",
+        "CFBundleVersion": "0.1.2",
+        "CFBundleShortVersionString": "0.1.2",
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
+        # Allow opening folders from Finder (drag to dock, "Open With")
+        "CFBundleDocumentTypes": [
+            {
+                "CFBundleTypeName": "Folder",
+                "CFBundleTypeRole": "Viewer",
+                "LSItemContentTypes": ["public.folder"],
+            },
+        ],
     },
     # Top-level packages to bundle
     "packages": ["termikita", "pyte"],

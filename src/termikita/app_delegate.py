@@ -2,7 +2,11 @@
 
 Wires together ConfigManager, ThemeManager, MainWindow, and TabController,
 builds the macOS menu bar, and opens the first terminal tab.
+Handles Finder "Open Here" via application:openFile: for folder paths.
 """
+
+import os
+import sys
 
 import objc  # type: ignore[import]
 from AppKit import (  # type: ignore[import]
@@ -43,8 +47,11 @@ class AppDelegate(NSObject):
             theme_colors,
         )
 
-        # Open first terminal tab
-        self._tab_ctrl.add_tab()
+        # Check CLI --dir argument for starting directory
+        start_dir = _parse_start_dir()
+
+        # Open first terminal tab (with optional working directory)
+        self._tab_ctrl.add_tab(working_dir=start_dir)
 
         # --- Menu bar ---
         self._setup_menu_bar()
@@ -52,6 +59,18 @@ class AppDelegate(NSObject):
         # --- Show window & activate app ---
         self._main_window.show()
         NSApp.activateIgnoringOtherApps_(True)
+
+    def application_openFile_(self, app: object, path: str) -> bool:
+        """Handle Finder "Open with Termikita" for folders.
+
+        Called when a folder is dragged onto the dock icon or opened via
+        Finder context menu Quick Action.
+        """
+        if os.path.isdir(path):
+            self._tab_ctrl.add_tab(working_dir=path)
+            NSApp.activateIgnoringOtherApps_(True)
+            return True
+        return False
 
     def applicationShouldTerminateAfterLastWindowClosed_(self, app: object) -> bool:
         """Quit the app when the last window is closed."""
@@ -129,3 +148,16 @@ class AppDelegate(NSObject):
     def closeTab_(self, sender: object) -> None:
         """Cmd+W — close the currently active tab."""
         self._tab_ctrl.close_tab(self._tab_ctrl.active_tab_index)
+
+
+def _parse_start_dir() -> str | None:
+    """Extract --dir <path> from sys.argv if present."""
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg == "--dir" and i + 1 < len(args):
+            path = args[i + 1]
+            return path if os.path.isdir(path) else None
+        # Also accept a bare directory path as first argument
+        if i == 0 and os.path.isdir(arg):
+            return arg
+    return None

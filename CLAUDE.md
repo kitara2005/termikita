@@ -64,9 +64,10 @@ This ensures packages installed by `install.sh` (google-genai, pypdf, etc.) are 
 ## Build Environment
 
 - Python 3.14.3 venv available at `.venv/`
-- Build command: `.venv/bin/python setup.py py2app`
 - Run from source: `.venv/bin/python -m termikita`
 - All dependencies (pyobjc, pyte, py2app) pre-installed in `.venv`
+- Build .app bundle: `.venv/bin/python setup.py py2app` → `dist/Termikita.app`
+- Build DMG installer: `bash build-dmg.sh` → `dist/Termikita.dmg` (requires .app built first)
 
 ## [IMPORTANT] Consider Modularization
 - If a code file exceeds 200 lines of code, consider modularizing it

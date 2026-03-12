@@ -47,6 +47,10 @@ _DECTCEM_HIDE_RE = re.compile(r"\x1b\[\?25l")
 _SCO_SAVE_RE = re.compile(r"\x1b\[s")
 _SCO_RESTORE_RE = re.compile(r"\x1b\[u")
 
+# Kitty keyboard protocol: CSI ?u (pop), CSI >Ps u (push), CSI =Ps;Ps u (set flags),
+# CSI <u (query). Pyte doesn't support these — strip to prevent 'u' leaking as text.
+_KITTY_KEYBOARD_RE = re.compile(r"\x1b\[[?>=<][0-9;]*u")
+
 
 class CellData(NamedTuple):
     """Immutable per-cell data for the renderer layer (Phase 04+)."""
@@ -176,6 +180,10 @@ class BufferManager:
         # OSC 8 hyperlink tracking
         self._osc8_current_url = _last_osc8_url(text, self._osc8_current_url)
         self._screen._osc8_current_url = self._osc8_current_url
+
+        # Strip Kitty keyboard protocol sequences before SCO conversion
+        # (both use CSI...u — Kitty has intermediate bytes ?/>/=/<)
+        text = _KITTY_KEYBOARD_RE.sub("", text)
 
         # Convert ANSI SCO save/restore cursor (ESC[s/ESC[u) to DEC (ESC7/ESC8)
         # so pyte tracks cursor position from Ink's cursor marker system.

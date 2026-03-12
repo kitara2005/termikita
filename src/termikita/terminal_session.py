@@ -45,6 +45,7 @@ class TerminalSession:
         on_output_callback: Optional[Callable[[], None]] = None,
         on_title_change: Optional[Callable[[str], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None,
+        working_dir: Optional[str] = None,
     ) -> None:
         """Create buffer + PTY and start the shell.
 
@@ -57,6 +58,7 @@ class TerminalSession:
             on_title_change: Optional callback invoked when OSC 2 changes the
                 window title (called from PTY thread — keep it lightweight).
             on_exit: Optional callback invoked with the shell exit code.
+            working_dir: Optional starting directory for the shell process.
         """
         self.cols = cols
         self.rows = rows
@@ -71,6 +73,7 @@ class TerminalSession:
             rows,
             on_output=self._handle_pty_output,
             on_exit=self._handle_pty_exit,
+            working_dir=working_dir,
         )
         self.is_alive: bool = True
 

@@ -56,6 +56,7 @@ class PTYManager:
         rows: int,
         on_output: Callable[[bytes], None],
         on_exit: Optional[Callable[[int], None]] = None,
+        working_dir: Optional[str] = None,
     ) -> None:
         """Spawn the user's shell and start the background read thread.
 
@@ -65,6 +66,7 @@ class PTYManager:
             on_output: Callback invoked with raw bytes from the child process.
             on_exit: Optional callback invoked with the exit code when the
                      child process terminates.
+            working_dir: Optional starting directory for the shell process.
         """
         self._on_output = on_output
         self._on_exit = on_exit
@@ -73,7 +75,7 @@ class PTYManager:
         self._child_pid: Optional[int] = None
         self._read_thread: Optional[threading.Thread] = None
 
-        self._spawn(get_user_shell(), cols, rows, _build_child_env())
+        self._spawn(get_user_shell(), cols, rows, _build_child_env(), working_dir)
 
     # ------------------------------------------------------------------
     # Public API
@@ -177,7 +179,10 @@ class PTYManager:
     # Private implementation
     # ------------------------------------------------------------------
 
-    def _spawn(self, shell: str, cols: int, rows: int, env: dict[str, str]) -> None:
+    def _spawn(
+        self, shell: str, cols: int, rows: int, env: dict[str, str],
+        working_dir: Optional[str] = None,
+    ) -> None:
         """Fork a child shell attached to a new PTY.
 
         Uses ``pty.fork()`` which calls openpty, fork, and setsid internally.
@@ -188,6 +193,13 @@ class PTYManager:
 
         if child_pid == 0:
             # --- Child process ---
+            # Change to requested working directory before exec
+            if working_dir and os.path.isdir(working_dir):
+                try:
+                    os.chdir(working_dir)
+                except OSError:
+                    pass
+
             # Set initial window size before exec so the shell starts with
             # the correct dimensions.
             try:
