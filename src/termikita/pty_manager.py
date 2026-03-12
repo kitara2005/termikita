@@ -32,6 +32,8 @@ def _build_child_env() -> dict[str, str]:
     env["TERM"] = DEFAULT_TERM
     env["COLORTERM"] = DEFAULT_COLORTERM
     env["LANG"] = env.get("LANG", "en_US.UTF-8")
+    # Suppress zsh's PROMPT_SP (%) mark on fresh start
+    env["PROMPT_EOL_MARK"] = ""
     return env
 
 
