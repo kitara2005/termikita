@@ -346,12 +346,8 @@ class BufferManager:
     # User scroll controls
     # ------------------------------------------------------------------
     def scroll_up(self, lines: int = 3) -> None:
-        # Disable scrollback when in alternate screen (TUI apps handle scroll themselves)
-        if self._screen.in_alternate_screen:
-            return
-        self._scroll_offset = min(self._scroll_offset + lines, len(self._scrollback))
-        self._force_full_redraw = True
-        self._visible_cache_valid = False
+        # TODO: re-enable scrollback after fixing resize duplication issue
+        return
 
     def scroll_down(self, lines: int = 3) -> None:
         self._scroll_offset = max(0, self._scroll_offset - lines)
