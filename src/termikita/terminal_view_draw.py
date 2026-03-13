@@ -142,6 +142,15 @@ class TerminalViewDrawMixin:
 
     def scrollWheel_(self, event: object) -> None:
         delta = event.deltaY()
+        # In alternate screen (TUI apps), forward scroll as arrow keys
+        # so apps like Claude Code, vim, less handle scroll themselves.
+        if self._session.buffer._screen.in_alternate_screen:
+            lines = max(1, int(abs(delta) * 3))
+            # Send Up/Down arrow keys to the PTY
+            key = b"\x1b[A" if delta > 0 else b"\x1b[B"
+            for _ in range(lines):
+                self._session.write(key)
+            return
         if delta > 0:
             self._session.buffer.scroll_up(max(1, int(delta * 3)))
         elif delta < 0:
