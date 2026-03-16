@@ -70,6 +70,7 @@ class TabController:
         self._tab_bar = tab_bar_view
         self._theme_colors = theme_colors or DEFAULT_THEME
         self._on_window_title_change = on_title_change
+        self._on_last_tab_closed: object = None  # callback when last tab closes
         self._pending_close_indices: list[int] = []
 
         self.tabs: list[TabItem] = []
@@ -139,12 +140,16 @@ class TabController:
         self.tabs.pop(index)
 
         if not self.tabs:
-            # Last tab closed — quit the app.
-            try:
-                from AppKit import NSApp  # type: ignore[import]
-                NSApp.terminate_(None)
-            except Exception:
-                pass
+            # Last tab closed — notify owner to close the window
+            if self._on_last_tab_closed is not None:
+                self._on_last_tab_closed()
+            else:
+                # Fallback: quit if no callback registered
+                try:
+                    from AppKit import NSApp  # type: ignore[import]
+                    NSApp.terminate_(None)
+                except Exception:
+                    pass
             return
 
         new_active = min(self.active_tab_index, len(self.tabs) - 1)

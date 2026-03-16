@@ -14,7 +14,9 @@ from AppKit import (  # type: ignore[import]
     NSApp,
     NSMenu,
     NSMenuItem,
+    NSApplication,
 )
+from Foundation import NSAppleEventManager  # type: ignore[import]
 
 from termikita.constants import APP_NAME
 from termikita.config_manager import ConfigManager
@@ -28,49 +30,204 @@ class AppDelegate(NSObject):
 
     def applicationDidFinishLaunching_(self, notification: object) -> None:
         """Bootstrap config, themes, window, tab controller, and menu."""
+        # Register Apple Event handler for 'open document' (odoc) events.
+        # PyObjC doesn't auto-dispatch these to application:openFile: reliably.
+        try:
+            aem = NSAppleEventManager.sharedAppleEventManager()
+            aem.setEventHandler_andSelector_forEventClass_andEventID_(
+                self, "handleOpenDocumentEvent:withReplyEvent:",
+                int.from_bytes(b"aevt", "big"),  # kCoreEventClass
+                int.from_bytes(b"odoc", "big"),   # kAEOpenDocuments
+            )
+            # Also register URL scheme handler (termikita://)
+            aem.setEventHandler_andSelector_forEventClass_andEventID_(
+                self, "handleGetURLEvent:withReplyEvent:",
+                int.from_bytes(b"GURL", "big"),  # kInternetEventClass
+                int.from_bytes(b"GURL", "big"),   # kAEGetURL
+            )
+        except Exception:
+            pass
+
         # --- Preferences & theme ---
         self._config = ConfigManager()
         self._theme_mgr = ThemeManager()
         self._theme_mgr.set_theme(self._config.theme)
-        theme_colors = self._theme_mgr.get_active_theme()
+        self._theme_colors = self._theme_mgr.get_active_theme()
 
-        # --- Window ---
-        self._main_window = MainWindow(
-            self._config.window_width,
-            self._config.window_height,
-        )
+        # Track all open windows: list of (MainWindow, TabController) pairs
+        self._windows: list[tuple[MainWindow, TabController]] = []
 
-        # --- Tab controller ---
-        self._tab_ctrl = TabController(
-            self._main_window.content_view,
-            self._main_window.tab_bar,
-            theme_colors,
-        )
-
-        # Check CLI --dir argument for starting directory
-        start_dir = _parse_start_dir()
-
-        # Open first terminal tab (with optional working directory)
-        self._tab_ctrl.add_tab(working_dir=start_dir)
+        # --- First window ---
+        main_win, tab_ctrl = self._create_window()
+        self._windows.append((main_win, tab_ctrl))
+        # Keep references for compatibility (Services handlers, default tab, etc.)
+        self._main_window = main_win
+        self._tab_ctrl = tab_ctrl
 
         # --- Menu bar ---
         self._setup_menu_bar()
+
+        # --- Register as NSServices provider ---
+        NSApp.setServicesProvider_(self)
 
         # --- Show window & activate app ---
         self._main_window.show()
         NSApp.activateIgnoringOtherApps_(True)
 
-    def application_openFile_(self, app: object, path: str) -> bool:
-        """Handle Finder "Open with Termikita" for folders.
+        # Defer default tab — give Services/odoc/GURL handlers a chance to open
+        # their own tab first. If no tab was opened after a short delay, open default.
+        start_dir = _parse_start_dir()
+        if start_dir:
+            # Explicit --dir arg: open immediately
+            self._tab_ctrl.add_tab(working_dir=start_dir)
+        else:
+            # Delay default tab so Services handler can run first
+            self.performSelector_withObject_afterDelay_(
+                "openDefaultTabIfNeeded", None, 0.5
+            )
 
-        Called when a folder is dragged onto the dock icon or opened via
-        Finder context menu Quick Action.
+    def _create_window(self) -> tuple[MainWindow, TabController]:
+        """Create a new MainWindow + TabController pair.
+
+        The TabController gets an on_last_tab_closed callback so it closes
+        its window (instead of terminating the app) when the last tab exits.
         """
+        win = MainWindow(self._config.window_width, self._config.window_height)
+
+        # Cascade new windows so they don't stack exactly on top of each other
+        if self._windows:
+            offset = len(self._windows) * 22
+            frame = win.window.frame()
+            win.window.setFrameOrigin_((frame.origin.x + offset, frame.origin.y - offset))
+
+        tab_ctrl = TabController(
+            win.content_view,
+            win.tab_bar,
+            self._theme_colors,
+        )
+        # Wire up the "last tab closed" callback to close the window
+        tab_ctrl._on_last_tab_closed = lambda tc=tab_ctrl, w=win: self._close_window(w, tc)
+        return win, tab_ctrl
+
+    def _close_window(self, win: MainWindow, tab_ctrl: TabController) -> None:
+        """Remove a window from tracking and close it. Quit if last window."""
+        pair = (win, tab_ctrl)
+        if pair in self._windows:
+            self._windows.remove(pair)
+        win.window.close()
+        # Update convenience refs to the frontmost remaining window
+        if self._windows:
+            self._main_window, self._tab_ctrl = self._windows[-1]
+        else:
+            NSApp.terminate_(None)
+
+    def _active_tab_ctrl(self) -> TabController:
+        """Return the TabController for the currently key window."""
+        key_win = NSApp.keyWindow()
+        if key_win is not None:
+            for win, tc in self._windows:
+                if win.window == key_win:
+                    return tc
+        # Fallback to first window's controller
+        return self._tab_ctrl
+
+    def openDefaultTabIfNeeded(self):
+        """Open default $HOME tab only if no tab was opened by event handlers."""
+        if len(self._tab_ctrl.tabs) == 0:
+            self._tab_ctrl.add_tab(working_dir=os.path.expanduser("~"))
+
+    def handleOpenDocumentEvent_withReplyEvent_(self, event, reply):
+        """Handle 'odoc' Apple Event — open folder in new tab."""
+        from Foundation import NSAppleEventDescriptor  # type: ignore[import]
+        direct_obj = event.paramDescriptorForKeyword_(int.from_bytes(b"----", "big"))
+        if direct_obj is None:
+            return
+        count = direct_obj.numberOfItems()
+        for i in range(1, count + 1):
+            desc = direct_obj.descriptorAtIndex_(i)
+            url = desc.fileURLValue() if desc else None
+            if url:
+                path = url.path()
+                if os.path.isdir(path):
+                    self._tab_ctrl.add_tab(working_dir=path)
+        NSApp.activateIgnoringOtherApps_(True)
+
+    def handleGetURLEvent_withReplyEvent_(self, event, reply):
+        """Handle termikita:// URL scheme via Apple Event (fallback)."""
+        direct_obj = event.paramDescriptorForKeyword_(int.from_bytes(b"----", "big"))
+        if direct_obj is None:
+            return
+        url_str = direct_obj.stringValue()
+        self._open_termikita_url(url_str)
+
+    def application_openURLs_(self, app, urls):
+        """Handle termikita:// URL scheme (modern delegate method).
+
+        Called by NSApplication after launch — no race condition.
+        URL format: termikita:///path/to/folder
+        """
+        for url in urls:
+            self._open_termikita_url(str(url.absoluteString()))
+
+    def _open_termikita_url(self, url_str):
+        """Parse termikita:// URL and open folder in new tab."""
+        if not url_str or not url_str.startswith("termikita://"):
+            return
+        from urllib.parse import unquote
+        # Extract path: termikita:///path → /path
+        path = unquote(url_str[len("termikita://"):])
         if os.path.isdir(path):
             self._tab_ctrl.add_tab(working_dir=path)
             NSApp.activateIgnoringOtherApps_(True)
-            return True
-        return False
+
+    # ------------------------------------------------------------------
+    # NSServices handler — "New Termikita Tab Here" in Finder context menu
+    # ------------------------------------------------------------------
+
+    @objc.typedSelector(b"v@:@@o^@")
+    def newTermikitaTabHere_userData_error_(self, pboard, userData, error):
+        """Handle Finder Services 'New Termikita Tab Here'.
+
+        Called by macOS when user right-clicks folder → Services → New Termikita Tab Here.
+        Reads file paths from pasteboard and opens a new tab for each directory.
+        Returns None on success, error string on failure (PyObjC convention for error: out param).
+        """
+        try:
+            paths = pboard.propertyListForType_("NSFilenamesPboardType")
+            if not paths:
+                return
+            for path in paths:
+                path = str(path)
+                if os.path.isdir(path):
+                    self._tab_ctrl.add_tab(working_dir=path)
+            NSApp.activateIgnoringOtherApps_(True)
+        except Exception as e:
+            return str(e)
+
+    @objc.typedSelector(b"v@:@@o^@")
+    def newTermikitaWindowHere_userData_error_(self, pboard, userData, error):
+        """Handle Finder Services 'New Termikita Window Here'.
+
+        Opens a new Termikita window at the selected folder.
+        """
+        try:
+            paths = pboard.propertyListForType_("NSFilenamesPboardType")
+            if not paths:
+                return
+            first_dir = None
+            for path in paths:
+                path = str(path)
+                if os.path.isdir(path):
+                    first_dir = path
+                    break
+            if first_dir:
+                win, tc = self._create_window()
+                self._windows.append((win, tc))
+                tc.add_tab(working_dir=first_dir)
+                win.show()
+            NSApp.activateIgnoringOtherApps_(True)
+        except Exception as e:
+            return str(e)
 
     def applicationShouldTerminateAfterLastWindowClosed_(self, app: object) -> bool:
         """Quit the app when the last window is closed."""
@@ -97,11 +254,15 @@ class AppDelegate(NSObject):
         app_menu_item.setSubmenu_(app_menu)
         main_menu.addItem_(app_menu_item)
 
-        # Shell menu — tab management
+        # Shell menu — tab and window management
         shell_menu = NSMenu.alloc().initWithTitle_("Shell")
+        shell_menu.addItemWithTitle_action_keyEquivalent_(
+            "New Window", "newWindow:", "n"
+        )
         shell_menu.addItemWithTitle_action_keyEquivalent_(
             "New Tab", "newTab:", "t"
         )
+        shell_menu.addItem_(NSMenuItem.separatorItem())
         shell_menu.addItemWithTitle_action_keyEquivalent_(
             "Close Tab", "closeTab:", "w"
         )
@@ -140,14 +301,26 @@ class AppDelegate(NSObject):
     # ------------------------------------------------------------------
 
     @objc.IBAction
+    def newWindow_(self, sender: object) -> None:
+        """Cmd+N — open a new terminal window."""
+        win, tc = self._create_window()
+        self._windows.append((win, tc))
+        tc.add_tab()
+        win.show()
+        # Update convenience refs to the new window
+        self._main_window = win
+        self._tab_ctrl = tc
+
+    @objc.IBAction
     def newTab_(self, sender: object) -> None:
-        """Cmd+T — open a new terminal tab."""
-        self._tab_ctrl.add_tab()
+        """Cmd+T — open a new terminal tab in the active window."""
+        self._active_tab_ctrl().add_tab()
 
     @objc.IBAction
     def closeTab_(self, sender: object) -> None:
         """Cmd+W — close the currently active tab."""
-        self._tab_ctrl.close_tab(self._tab_ctrl.active_tab_index)
+        tc = self._active_tab_ctrl()
+        tc.close_tab(tc.active_tab_index)
 
 
 def _parse_start_dir() -> str | None:
