@@ -107,6 +107,22 @@ class TermikitaScreen(pyte.Screen):
         # We save the main buffer + cursor on DECSET 1049 and restore on DECRST.
         self._saved_main_buffer: dict | None = None
         self._saved_main_cursor: tuple | None = None
+        # Bell callback — invoked when BEL (\x07) arrives from PTY
+        self._on_bell: object = None  # Callable[[], None] | None
+        self._last_bell_time: float = 0.0
+
+    def bell(self, *args) -> None:
+        """Handle BEL character — trigger dock bounce / notification.
+        Cooldown of 2s prevents rapid repeated bounces from BEL-spamming apps."""
+        if self._on_bell is not None:
+            import time
+            now = time.monotonic()
+            if now - self._last_bell_time > 2.0:
+                self._last_bell_time = now
+                try:
+                    self._on_bell()
+                except Exception:
+                    pass
 
     @property
     def in_alternate_screen(self) -> bool:
@@ -182,8 +198,12 @@ class BufferManager:
         lines = bm.get_visible_lines()
     """
 
-    def __init__(self, cols: int, rows: int, scrollback_max: int = DEFAULT_SCROLLBACK) -> None:
+    def __init__(
+        self, cols: int, rows: int, scrollback_max: int = DEFAULT_SCROLLBACK,
+        on_bell: object = None,
+    ) -> None:
         self._screen = TermikitaScreen(cols, rows)
+        self._screen._on_bell = on_bell  # wire BEL → dock bounce
         self._stream = pyte.Stream(self._screen)
 
         # Ring buffer — auto-drops oldest when full, zero GC cost

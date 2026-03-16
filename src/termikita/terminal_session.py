@@ -81,7 +81,7 @@ class TerminalSession:
         self._last_output_time: float = 0.0
         self._last_notify_time: float = 0.0
 
-        self.buffer = BufferManager(cols, rows, DEFAULT_SCROLLBACK)
+        self.buffer = BufferManager(cols, rows, DEFAULT_SCROLLBACK, on_bell=on_activity)
         self.pty = PTYManager(
             cols,
             rows,
