@@ -161,14 +161,31 @@ class TerminalViewInputMixin:
             pass
 
     def _paste_clipboard(self) -> None:
-        """Paste clipboard text to PTY as UTF-8 bytes."""
+        """Paste clipboard content to PTY — text or image (saved as temp file path)."""
         try:
-            from AppKit import NSPasteboard, NSPasteboardTypeString  # type: ignore[import]
+            from AppKit import (  # type: ignore[import]
+                NSPasteboard, NSPasteboardTypeString,
+                NSPasteboardTypePNG, NSPasteboardTypeTIFF,
+            )
             pb = NSPasteboard.generalPasteboard()
+
+            # Try text first
             text = pb.stringForType_(NSPasteboardTypeString)
             if text:
-                # NFC normalize pasted Vietnamese text to match buffer normalization
                 self._session.write(normalize_text(str(text)).encode("utf-8"))
+                return
+
+            # Try image — save to temp file, paste path (like iTerm2)
+            img_data = pb.dataForType_(NSPasteboardTypePNG)
+            if img_data is None:
+                img_data = pb.dataForType_(NSPasteboardTypeTIFF)
+            if img_data and img_data.length() > 0:
+                import tempfile
+                fd, path = tempfile.mkstemp(suffix=".png", prefix="termikita-paste-")
+                import os
+                os.write(fd, bytes(img_data))
+                os.close(fd)
+                self._session.write(path.encode("utf-8"))
         except Exception:
             pass
 
