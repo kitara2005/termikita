@@ -56,6 +56,8 @@ class AppDelegate(NSObject):
 
         # Track all open windows: list of (MainWindow, TabController) pairs
         self._windows: list[tuple[MainWindow, TabController]] = []
+        # Flag: set True when Services/odoc/GURL handler opens content
+        self._external_open_handled = False
 
         # --- First window ---
         main_win, tab_ctrl = self._create_window()
@@ -104,6 +106,7 @@ class AppDelegate(NSObject):
             win.content_view,
             win.tab_bar,
             self._theme_colors,
+            config=self._config,
         )
         # Wire up the "last tab closed" callback to close the window
         tab_ctrl._on_last_tab_closed = lambda tc=tab_ctrl, w=win: self._close_window(w, tc)
@@ -133,6 +136,16 @@ class AppDelegate(NSObject):
 
     def openDefaultTabIfNeeded(self):
         """Open default $HOME tab only if no tab was opened by event handlers."""
+        if self._external_open_handled:
+            # External handler opened content — close the empty default window
+            # if it has no tabs (e.g. Services opened a separate new window)
+            first_win, first_tc = self._windows[0]
+            if len(first_tc.tabs) == 0:
+                self._windows.remove((first_win, first_tc))
+                first_win.window.close()
+                if self._windows:
+                    self._main_window, self._tab_ctrl = self._windows[-1]
+            return
         if len(self._tab_ctrl.tabs) == 0:
             self._tab_ctrl.add_tab(working_dir=os.path.expanduser("~"))
 
@@ -149,6 +162,7 @@ class AppDelegate(NSObject):
             if url:
                 path = url.path()
                 if os.path.isdir(path):
+                    self._external_open_handled = True
                     self._tab_ctrl.add_tab(working_dir=path)
         NSApp.activateIgnoringOtherApps_(True)
 
@@ -177,6 +191,7 @@ class AppDelegate(NSObject):
         # Extract path: termikita:///path → /path
         path = unquote(url_str[len("termikita://"):])
         if os.path.isdir(path):
+            self._external_open_handled = True
             self._tab_ctrl.add_tab(working_dir=path)
             NSApp.activateIgnoringOtherApps_(True)
 
@@ -199,6 +214,7 @@ class AppDelegate(NSObject):
             for path in paths:
                 path = str(path)
                 if os.path.isdir(path):
+                    self._external_open_handled = True
                     self._tab_ctrl.add_tab(working_dir=path)
             NSApp.activateIgnoringOtherApps_(True)
         except Exception as e:
@@ -221,6 +237,7 @@ class AppDelegate(NSObject):
                     first_dir = path
                     break
             if first_dir:
+                self._external_open_handled = True
                 win, tc = self._create_window()
                 self._windows.append((win, tc))
                 tc.add_tab(working_dir=first_dir)
@@ -285,6 +302,28 @@ class AppDelegate(NSObject):
         edit_menu_item.setSubmenu_(edit_menu)
         main_menu.addItem_(edit_menu_item)
 
+        # View menu — font zoom
+        view_menu = NSMenu.alloc().initWithTitle_("View")
+        view_menu.addItemWithTitle_action_keyEquivalent_("Bigger", "zoomIn:", "=")
+        view_menu.addItemWithTitle_action_keyEquivalent_("Smaller", "zoomOut:", "-")
+        view_menu.addItemWithTitle_action_keyEquivalent_("Default Size", "zoomReset:", "0")
+        view_menu_item = NSMenuItem.alloc().init()
+        view_menu_item.setSubmenu_(view_menu)
+        main_menu.addItem_(view_menu_item)
+
+        # Format menu — font panel
+        format_menu = NSMenu.alloc().initWithTitle_("Format")
+        font_submenu = NSMenu.alloc().initWithTitle_("Font")
+        font_submenu.addItemWithTitle_action_keyEquivalent_(
+            "Show Fonts", "orderFrontFontPanel:", ""
+        )
+        font_item = NSMenuItem.alloc().init()
+        font_item.setSubmenu_(font_submenu)
+        format_menu.addItem_(font_item)
+        format_menu_item = NSMenuItem.alloc().init()
+        format_menu_item.setSubmenu_(format_menu)
+        main_menu.addItem_(format_menu_item)
+
         # Window menu — standard window controls
         window_menu = NSMenu.alloc().initWithTitle_("Window")
         window_menu.addItemWithTitle_action_keyEquivalent_(
@@ -321,6 +360,21 @@ class AppDelegate(NSObject):
         """Cmd+W — close the currently active tab."""
         tc = self._active_tab_ctrl()
         tc.close_tab(tc.active_tab_index)
+
+    @objc.IBAction
+    def zoomIn_(self, sender: object) -> None:
+        """Cmd+= — increase font size."""
+        self._active_tab_ctrl().zoom_in()
+
+    @objc.IBAction
+    def zoomOut_(self, sender: object) -> None:
+        """Cmd+- — decrease font size."""
+        self._active_tab_ctrl().zoom_out()
+
+    @objc.IBAction
+    def zoomReset_(self, sender: object) -> None:
+        """Cmd+0 — reset font size to default."""
+        self._active_tab_ctrl().zoom_reset()
 
 
 def _parse_start_dir() -> str | None:

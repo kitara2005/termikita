@@ -34,6 +34,11 @@ from termikita.constants import (
 
 TAB_BAR_HEIGHT: float = 28.0
 
+# Font zoom bounds and step (points)
+_FONT_SIZE_MIN = 8.0
+_FONT_SIZE_MAX = 36.0
+_FONT_SIZE_STEP = 1.0
+
 DEFAULT_THEME: dict = {
     "foreground": (204, 204, 204),
     "background": (30, 30, 30),
@@ -65,6 +70,7 @@ class TabController:
         tab_bar_view: object,
         theme_colors: Optional[dict] = None,
         on_title_change: Optional[object] = None,
+        config: Optional[object] = None,
     ) -> None:
         self._content_view = content_view
         self._tab_bar = tab_bar_view
@@ -72,6 +78,7 @@ class TabController:
         self._on_window_title_change = on_title_change
         self._on_last_tab_closed: object = None  # callback when last tab closes
         self._pending_close_indices: list[int] = []
+        self._config = config  # ConfigManager for persisting font/settings
 
         self.tabs: list[TabItem] = []
         self.active_tab_index: int = -1
@@ -90,7 +97,10 @@ class TabController:
             working_dir: Optional starting directory for the shell process.
         """
         renderer = TextRenderer()
-        renderer.set_font(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE)
+        # Use config font if available, otherwise fall back to constants
+        font_family = self._config.font_family if self._config else DEFAULT_FONT_FAMILY
+        font_size = self._config.font_size if self._config else DEFAULT_FONT_SIZE
+        renderer.set_font(font_family, font_size)
         cols, rows = self._grid_size(renderer)
 
         session = TerminalSession(
@@ -99,6 +109,7 @@ class TabController:
             on_output_callback=None,
             on_title_change=self._on_tab_title_change,
             on_exit=self._on_tab_exit,
+            on_activity=_request_user_attention,
             working_dir=working_dir,
         )
 
@@ -119,6 +130,9 @@ class TabController:
         _start_view_timers(view)
         view.setNeedsDisplay_(True)
 
+        # Wire font change callback for NSFontPanel integration
+        view._on_font_change = lambda fam, sz: self.set_font(fam, sz)
+
         tab = TabItem(session=session, view=view, title="Terminal")
         self.tabs.append(tab)
         self.select_tab(len(self.tabs) - 1)
@@ -136,6 +150,7 @@ class TabController:
         except Exception:
             pass
         tab.view._session = None
+        tab.view._on_font_change = None  # break reference cycle
         tab.view.removeFromSuperview()
         self.tabs.pop(index)
 
@@ -212,6 +227,48 @@ class TabController:
         self.tabs = [kept_tab]
         self.active_tab_index = -1
         self.select_tab(0)
+
+    def set_font(self, family: str, size: float) -> None:
+        """Update font for all tabs, recalculate metrics, resize PTYs, persist."""
+        if self._config:
+            self._config.set("font_family", family)
+            self._config.set("font_size", size)
+            self._config.save()
+        from termikita.cell_draw_helpers import invalidate_glyph_cache
+        invalidate_glyph_cache()
+        for tab in self.tabs:
+            tab.view._renderer.set_font(family, size)
+            # Trigger frame recalculation which handles PTY resize
+            tab.view.setFrameSize_(tab.view.frame().size)
+        # Update NSFontManager selected font for font panel sync
+        try:
+            from AppKit import NSFontManager  # type: ignore[import]
+            active_view = self.get_active_view()
+            if active_view and active_view._renderer.primary_font:
+                fm = NSFontManager.sharedFontManager()
+                fm.setSelectedFont_isMultiple_(active_view._renderer.primary_font, False)
+        except Exception:
+            pass
+
+    def zoom_in(self) -> None:
+        """Increase font size by 1pt (Cmd+=)."""
+        current = self._config.font_size if self._config else DEFAULT_FONT_SIZE
+        new_size = min(current + _FONT_SIZE_STEP, _FONT_SIZE_MAX)
+        family = self._config.font_family if self._config else DEFAULT_FONT_FAMILY
+        self.set_font(family, new_size)
+
+    def zoom_out(self) -> None:
+        """Decrease font size by 1pt (Cmd+-)."""
+        current = self._config.font_size if self._config else DEFAULT_FONT_SIZE
+        new_size = max(current - _FONT_SIZE_STEP, _FONT_SIZE_MIN)
+        family = self._config.font_family if self._config else DEFAULT_FONT_FAMILY
+        self.set_font(family, new_size)
+
+    def zoom_reset(self) -> None:
+        """Reset font size to default (Cmd+0)."""
+        from termikita.config_manager import DEFAULTS
+        family = self._config.font_family if self._config else DEFAULT_FONT_FAMILY
+        self.set_font(family, DEFAULTS["font_size"])
 
     def set_theme(self, theme_colors: dict) -> None:
         """Push a new theme to all existing tabs."""
@@ -313,5 +370,37 @@ def _start_view_timers(view: TerminalView) -> None:
     try:
         if hasattr(view, "_start_timers"):
             view._start_timers()
+    except Exception:
+        pass
+
+
+from AppKit import NSObject, NSApp, NSInformationalRequest  # type: ignore[import]
+
+
+class _DockBouncer(NSObject):
+    """Helper to dispatch dock bounce to main thread via performSelectorOnMainThread."""
+
+    def bounce_(self, _sender: object) -> None:
+        try:
+            if not NSApp.isActive():
+                NSApp.requestUserAttention_(NSInformationalRequest)
+        except Exception:
+            pass
+
+
+# Singleton bouncer — created once, reused for all notifications
+_bouncer = _DockBouncer.alloc().init()
+
+
+def _request_user_attention() -> None:
+    """Bounce dock icon when a command likely finished.
+
+    Called from PTY read thread — dispatch to main thread for reliable
+    NSApp.isActive() and requestUserAttention_ behavior.
+    """
+    try:
+        _bouncer.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "bounce:", None, False
+        )
     except Exception:
         pass

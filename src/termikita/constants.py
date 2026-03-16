@@ -14,8 +14,8 @@ DEFAULT_ROWS = 24
 # Scrollback buffer size (lines)
 DEFAULT_SCROLLBACK = 100_000
 
-# Font defaults
-DEFAULT_FONT_FAMILY = "Menlo"
+# Font defaults — SF Mono is Apple's system monospace, optimized for Retina
+DEFAULT_FONT_FAMILY = "SF Mono"
 DEFAULT_FONT_SIZE = 13.0
 
 # Terminal padding (points) — breathing room between text and view edges

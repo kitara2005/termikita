@@ -7,6 +7,7 @@ flag polled by the view's 60 fps refresh timer (no cross-thread ObjC calls).
 
 from __future__ import annotations
 
+import time
 from typing import Callable, Optional
 
 from termikita.buffer_manager import BufferManager
@@ -16,6 +17,12 @@ from termikita.constants import (
     DEFAULT_ROWS,
     DEFAULT_SCROLLBACK,
 )
+
+# Silence threshold: output arriving after this many seconds of quiet
+# suggests a command just finished (shell printed its prompt).
+_SILENCE_THRESHOLD: float = 2.0
+# Cooldown between activity notifications to avoid rapid repeated bounces.
+_ACTIVITY_COOLDOWN: float = 5.0
 
 
 class TerminalSession:
@@ -45,6 +52,7 @@ class TerminalSession:
         on_output_callback: Optional[Callable[[], None]] = None,
         on_title_change: Optional[Callable[[str], None]] = None,
         on_exit: Optional[Callable[[int], None]] = None,
+        on_activity: Optional[Callable[[], None]] = None,
         working_dir: Optional[str] = None,
     ) -> None:
         """Create buffer + PTY and start the shell.
@@ -58,6 +66,8 @@ class TerminalSession:
             on_title_change: Optional callback invoked when OSC 2 changes the
                 window title (called from PTY thread — keep it lightweight).
             on_exit: Optional callback invoked with the shell exit code.
+            on_activity: Optional callback invoked when a command likely finished
+                (output after prolonged silence). Used for dock bounce / notification.
             working_dir: Optional starting directory for the shell process.
         """
         self.cols = cols
@@ -65,7 +75,11 @@ class TerminalSession:
         self._on_output = on_output_callback
         self._on_title_change = on_title_change
         self._on_exit_callback = on_exit
+        self._on_activity = on_activity
         self._prev_title: str = ""
+        # Track output timing for "command finished" heuristic
+        self._last_output_time: float = 0.0
+        self._last_notify_time: float = 0.0
 
         self.buffer = BufferManager(cols, rows, DEFAULT_SCROLLBACK)
         self.pty = PTYManager(
@@ -117,6 +131,22 @@ class TerminalSession:
         will detect buffer.dirty and call setNeedsDisplay_ — no ObjC cross-
         thread dispatch required.
         """
+        # Detect "output after silence" — a command likely just finished
+        now = time.monotonic()
+        if self._last_output_time > 0:
+            silence = now - self._last_output_time
+            if (
+                silence > _SILENCE_THRESHOLD
+                and now - self._last_notify_time > _ACTIVITY_COOLDOWN
+                and self._on_activity is not None
+            ):
+                self._last_notify_time = now
+                try:
+                    self._on_activity()
+                except Exception:
+                    pass
+        self._last_output_time = now
+
         self.buffer.feed(data)
 
         # Notify title change if OSC 2 updated the screen title

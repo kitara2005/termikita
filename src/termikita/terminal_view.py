@@ -88,6 +88,8 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         self._prev_cursor_pos: tuple[int, int] | None = None
         # Font smoothing preference from macOS system defaults
         self._font_smoothing: bool = get_font_smoothing_enabled()
+        # Callback set by TabController for NSFontPanel font changes
+        self._on_font_change: object = None
 
     def _init_session(self) -> None:
         cw, ch = self._renderer.get_cell_dimensions()
@@ -330,6 +332,29 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
 
     def doCommandBySelector_(self, selector: object) -> None:
         pass
+
+    # ------------------------------------------------------------------
+    # NSFontPanel integration — font picker callback
+    # ------------------------------------------------------------------
+
+    def changeFont_(self, sender: object) -> None:
+        """NSFontPanel callback — user selected a new font."""
+        current_font = self._renderer.primary_font
+        if current_font is None:
+            return
+        new_font = sender.convertFont_(current_font)
+        if new_font is None:
+            return
+        family = str(new_font.familyName())
+        size = float(new_font.pointSize())
+        callback = getattr(self, "_on_font_change", None)
+        if callback:
+            callback(family, size)
+
+    def validModesForFontPanel_(self, font_panel: object) -> int:
+        """Show only face, size, and collection in font panel."""
+        # NSFontPanelFaceModeMask | NSFontPanelSizeModeMask | NSFontPanelCollectionModeMask
+        return 0x1 | 0x2 | 0x4
 
     def _handle_cmd_shortcut(self, event: object) -> None:
         chars = event.charactersIgnoringModifiers()

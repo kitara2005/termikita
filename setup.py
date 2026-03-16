@@ -61,6 +61,41 @@ OPTIONS = {
                 "LSItemContentTypes": ["public.folder"],
             },
         ],
+        # Custom URL scheme: termikita:///path/to/folder
+        "CFBundleURLTypes": [
+            {
+                "CFBundleURLName": "com.termikita.open",
+                "CFBundleURLSchemes": ["termikita"],
+            },
+        ],
+        # NSServices — "New Termikita Tab Here" in Finder right-click menu
+        # Like iTerm2, registered in Info.plist for auto-discovery (no user config)
+        "NSServices": [
+            {
+                "NSMessage": "newTermikitaTabHere",
+                "NSPortName": "Termikita",
+                "NSMenuItem": {
+                    "default": "New Termikita Tab Here",
+                },
+                "NSRequiredContext": {},
+                "NSSendTypes": [
+                    "NSFilenamesPboardType",
+                    "public.plain-text",
+                ],
+            },
+            {
+                "NSMessage": "newTermikitaWindowHere",
+                "NSPortName": "Termikita",
+                "NSMenuItem": {
+                    "default": "New Termikita Window Here",
+                },
+                "NSRequiredContext": {},
+                "NSSendTypes": [
+                    "NSFilenamesPboardType",
+                    "public.plain-text",
+                ],
+            },
+        ],
     },
     # Top-level packages to bundle
     "packages": ["termikita", "pyte"],

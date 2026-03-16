@@ -52,9 +52,8 @@ class TerminalViewDrawMixin:
         cg_ctx = context.CGContext()
         CGContextSetShouldAntialias(cg_ctx, True)
         CGContextSetAllowsFontSmoothing(cg_ctx, True)
-        # Disable font smoothing for crisp monospace text (like Terminal.app)
-        # Smoothing adds glyph weight — good for prose, bad for terminal grids
-        CGContextSetShouldSmoothFonts(cg_ctx, False)
+        # Respect macOS AppleFontSmoothing preference for crisp Retina text
+        CGContextSetShouldSmoothFonts(cg_ctx, self._font_smoothing)
         # Subpixel positioning: allows fractional glyph placement for sharper text
         CGContextSetAllowsFontSubpixelPositioning(cg_ctx, True)
         CGContextSetShouldSubpixelPositionFonts(cg_ctx, True)
@@ -150,6 +149,9 @@ class TerminalViewDrawMixin:
             key = b"\x1b[A" if delta > 0 else b"\x1b[B"
             for _ in range(lines):
                 self._session.write(key)
+            return
+        # Only allow scrolling when scrollback history exists
+        if not self._session.buffer.scrollback_length:
             return
         if delta > 0:
             self._session.buffer.scroll_up(max(1, int(delta * 3)))

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import codecs
 import collections
+import copy
 import re
 from typing import NamedTuple
 
@@ -102,25 +103,48 @@ class TermikitaScreen(pyte.Screen):
         self._osc8_current_url: str | None = None
         self._resizing: bool = False
         self._saved_scrollback_len: int | None = None  # saved on alt screen enter
+        # Pyte doesn't implement alternate screen buffer save/restore.
+        # We save the main buffer + cursor on DECSET 1049 and restore on DECRST.
+        self._saved_main_buffer: dict | None = None
+        self._saved_main_cursor: tuple | None = None
 
     @property
     def in_alternate_screen(self) -> bool:
         return _DECSET_1049 in self.mode
 
     def set_mode(self, *modes, **kwargs):
-        """Track alternate screen enter — save scrollback length."""
+        """Track alternate screen enter — save main buffer and scrollback."""
         prev_alt = self.in_alternate_screen
         super().set_mode(*modes, **kwargs)
         if not prev_alt and self.in_alternate_screen:
             self._saved_scrollback_len = len(self._scrollback)
+            # Save main buffer and cursor (pyte doesn't do this)
+            self._saved_main_buffer = copy.deepcopy(dict(self.buffer))
+            c = self.cursor
+            self._saved_main_cursor = (c.x, c.y, c.hidden, copy.copy(c.attrs))
+            # Clear alternate screen (standard DECSET 1049 behavior)
+            self.erase_in_display(2)
+            self.cursor_position()
 
     def reset_mode(self, *modes, **kwargs):
-        """Track alternate screen exit — truncate scrollback to saved length."""
+        """Track alternate screen exit — restore main buffer and scrollback."""
         prev_alt = self.in_alternate_screen
         super().reset_mode(*modes, **kwargs)
         if prev_alt and not self.in_alternate_screen:
+            # Restore main buffer (pyte doesn't do this)
+            if self._saved_main_buffer is not None:
+                self.buffer.clear()
+                for row, line in self._saved_main_buffer.items():
+                    self.buffer[row] = line
+                self._saved_main_buffer = None
+            if self._saved_main_cursor is not None:
+                x, y, hidden, attrs = self._saved_main_cursor
+                self.cursor.x, self.cursor.y = x, y
+                self.cursor.hidden = hidden
+                self.cursor.attrs = attrs
+                self._saved_main_cursor = None
+            # Remove any scrollback accumulated during alternate screen
             if self._saved_scrollback_len is not None:
-                # Remove any scrollback accumulated during alternate screen
                 while len(self._scrollback) > self._saved_scrollback_len:
                     self._scrollback.pop()
                 self._saved_scrollback_len = None
@@ -133,9 +157,11 @@ class TermikitaScreen(pyte.Screen):
 
     def index(self) -> None:  # type: ignore[override]
         """Capture departing top line into scrollback, then scroll.
+        Only captures when cursor is at bottom margin (actual scroll imminent).
         Skip during resize and alternate screen."""
-        top, _ = self.margins or _Margins(0, self.lines - 1)
-        if top == 0 and not self.in_alternate_screen and not self._resizing:
+        top, bottom = self.margins or _Margins(0, self.lines - 1)
+        if (top == 0 and self.cursor.y == bottom
+                and not self.in_alternate_screen and not self._resizing):
             self._scrollback.append(self.capture_line(0))
         super().index()
 
@@ -227,6 +253,11 @@ class BufferManager:
         text = _SCO_RESTORE_RE.sub("\x1b8", text)
 
         self._stream.feed(text)
+        # Auto-scroll to bottom on new data (iTerm2 behavior) — prevents
+        # viewport drift when scrollback grows while user is scrolled up.
+        if self._scroll_offset > 0:
+            self._scroll_offset = 0
+            self._force_full_redraw = True
         self._visible_cache_valid = False
         self._has_new_output = True
 
@@ -346,8 +377,13 @@ class BufferManager:
     # User scroll controls
     # ------------------------------------------------------------------
     def scroll_up(self, lines: int = 3) -> None:
-        # TODO: re-enable scrollback after fixing resize duplication issue
-        return
+        """Scroll viewport up into scrollback history. Clamped to available scrollback."""
+        max_offset = len(self._scrollback)
+        if max_offset == 0:
+            return
+        self._scroll_offset = min(max_offset, self._scroll_offset + lines)
+        self._force_full_redraw = True
+        self._visible_cache_valid = False
 
     def scroll_down(self, lines: int = 3) -> None:
         self._scroll_offset = max(0, self._scroll_offset - lines)

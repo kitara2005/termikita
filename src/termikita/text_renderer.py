@@ -242,16 +242,16 @@ def _add_font_cascade(font: object) -> object:
         nerd_descriptors = _find_nerd_font_descriptors()
         cascade = [
             *nerd_descriptors,
-            # Symbols, geometric shapes, arrows, dingbats
+            # Geometric/misc symbols — best coverage and weight matching
             CTFontDescriptorCreateWithNameAndSize("Apple Symbols", 0),
-            # Emoji support
-            CTFontDescriptorCreateWithNameAndSize("Apple Color Emoji", 0),
             # Monospace fallbacks (box drawing, powerline, etc.)
             CTFontDescriptorCreateWithNameAndSize("Menlo", 0),
             CTFontDescriptorCreateWithNameAndSize("Monaco", 0),
-            # Broad Unicode coverage (diamonds ◆, bullets ●, arrows ▶)
+            # Broad Unicode coverage (diamonds, bullets, arrows)
             CTFontDescriptorCreateWithNameAndSize("Lucida Grande", 0),
             CTFontDescriptorCreateWithNameAndSize("Helvetica Neue", 0),
+            # Emoji — placed after symbol fonts to avoid emoji override for geometric chars
+            CTFontDescriptorCreateWithNameAndSize("Apple Color Emoji", 0),
             # System UI font — widest coverage on macOS
             CTFontDescriptorCreateWithNameAndSize(".AppleSystemUIFont", 0),
         ]
