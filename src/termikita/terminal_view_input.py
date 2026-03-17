@@ -180,11 +180,11 @@ class TerminalViewInputMixin:
             if img_data is None:
                 img_data = pb.dataForType_(NSPasteboardTypeTIFF)
             if img_data and img_data.length() > 0:
-                import tempfile
+                import tempfile, os, atexit
                 fd, path = tempfile.mkstemp(suffix=".png", prefix="termikita-paste-")
-                import os
                 os.write(fd, bytes(img_data))
                 os.close(fd)
+                atexit.register(lambda p=path: os.unlink(p) if os.path.exists(p) else None)
                 self._session.write(path.encode("utf-8"))
         except Exception:
             pass

@@ -67,10 +67,12 @@ class ConfigManager:
         self._data[key] = value
 
     def save(self) -> None:
-        """Persist current config to disk."""
+        """Persist current config to disk (atomic write to avoid corruption)."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._config_path, "w") as f:
+        tmp_path = self._config_path.with_suffix(".tmp")
+        with open(tmp_path, "w") as f:
             json.dump(self._data, f, indent=2)
+        tmp_path.replace(self._config_path)
 
     def reload(self) -> None:
         """Reset to defaults then re-read config file from disk."""
