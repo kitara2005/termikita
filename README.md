@@ -262,6 +262,14 @@ brew install font-symbols-only-nerd-font
 
 ---
 
+## Vietnamese IME Note
+
+Termikita fully supports Vietnamese input via Telex/VNI through the macOS `NSTextInputClient` protocol. However, when running CLI tools that use `/` prefixed commands (e.g. Claude Code slash commands), the IME may compose letters unintentionally — for example, typing `/commit` could produce `/cômmit`.
+
+**Workaround:** Press `Cmd+Space` to switch to the English input source before typing slash commands, then `Cmd+Space` again to switch back. This is a limitation of how macOS IME works at the OS level — the terminal cannot detect when an app inside it expects raw ASCII input.
+
+---
+
 ## Development
 
 ```bash

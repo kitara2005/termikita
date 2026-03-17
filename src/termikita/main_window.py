@@ -6,26 +6,23 @@ masks so resizing the window keeps proportions correct.
 """
 
 from AppKit import (  # type: ignore[import]
-    NSWindow,
-    NSView,
-    NSWindowStyleMaskTitled,
-    NSWindowStyleMaskClosable,
-    NSWindowStyleMaskMiniaturizable,
-    NSWindowStyleMaskResizable,
     NSBackingStoreBuffered,
     NSMakeRect,
     NSMakeSize,
     NSScreen,
-    NSViewWidthSizable,
+    NSView,
     NSViewHeightSizable,
     NSViewMinYMargin,
+    NSViewWidthSizable,
+    NSWindow,
+    NSWindowStyleMaskClosable,
+    NSWindowStyleMaskMiniaturizable,
+    NSWindowStyleMaskResizable,
+    NSWindowStyleMaskTitled,
 )
 
-from termikita.constants import APP_NAME
+from termikita.constants import APP_NAME, TAB_BAR_HEIGHT
 from termikita.tab_bar_view import TabBarView
-
-# Height of the tab strip in pixels — must match TabController.TAB_BAR_HEIGHT
-TAB_BAR_HEIGHT: float = 28.0
 
 
 class MainWindow:

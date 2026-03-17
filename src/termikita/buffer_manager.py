@@ -113,6 +113,22 @@ class TermikitaScreen(pyte.Screen):
         # Counter: how many lines were appended to scrollback during a feed() cycle.
         # Used by BufferManager to adjust _scroll_offset and keep viewport stable.
         self._scrollback_appended: int = 0
+        # Callback to write responses back to PTY (DA1, DSR, etc.)
+        # Set by BufferManager; pyte calls write_process_input() for terminal queries.
+        self._write_to_pty: object = None  # Callable[[bytes], None] | None
+
+    def write_process_input(self, data: str) -> None:
+        """Forward terminal query responses (DA1, DSR) to PTY master fd.
+
+        Pyte calls this when the child process queries terminal capabilities
+        (DA1: ESC[c) or cursor position (DSR: ESC[6n). Without this, programs
+        like interactive CLI prompts may fall back to dumb/no-cursor mode.
+        """
+        if self._write_to_pty is not None:
+            try:
+                self._write_to_pty(data.encode("ascii"))
+            except Exception:
+                pass
 
     def bell(self, *args) -> None:
         """Handle BEL character — trigger dock bounce / notification.
@@ -205,9 +221,12 @@ class BufferManager:
     def __init__(
         self, cols: int, rows: int, scrollback_max: int = DEFAULT_SCROLLBACK,
         on_bell: object = None,
+        on_query_response: object = None,
     ) -> None:
         self._screen = TermikitaScreen(cols, rows)
         self._screen._on_bell = on_bell  # wire BEL → dock bounce
+        # Wire write_process_input → PTY for DA1/DSR query responses
+        self._screen._write_to_pty = on_query_response
         self._stream = pyte.Stream(self._screen)
 
         # Ring buffer — auto-drops oldest when full, zero GC cost
@@ -390,9 +409,6 @@ class BufferManager:
         """Dirty row indices, or None when full redraw needed (scroll/resize)."""
         if self._force_full_redraw:
             return None
-        return set(self._screen.dirty)
-
-    def get_dirty_lines(self) -> set[int]:
         return set(self._screen.dirty)
 
     def clear_dirty(self) -> None:

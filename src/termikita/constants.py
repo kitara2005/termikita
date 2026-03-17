@@ -52,6 +52,23 @@ def get_font_smoothing_enabled() -> bool:
         return True
 
 
+# Tab bar height (points) — shared by main_window.py and tab_controller.py
+TAB_BAR_HEIGHT: float = 28.0
+
+# Fallback theme colors — used when no JSON theme is loaded
+DEFAULT_THEME: dict = {
+    "foreground": (204, 204, 204),
+    "background": (30, 30, 30),
+    "cursor": (255, 255, 255),
+    "selection": (68, 68, 68),
+    "ansi": [
+        (0, 0, 0),       (204, 0, 0),     (0, 204, 0),     (204, 204, 0),
+        (0, 0, 204),     (204, 0, 204),   (0, 204, 204),   (204, 204, 204),
+        (128, 128, 128), (255, 0, 0),     (0, 255, 0),     (255, 255, 0),
+        (0, 0, 255),     (255, 0, 255),   (0, 255, 255),   (255, 255, 255),
+    ],
+}
+
 # PTY I/O constants
 PTY_READ_CHUNK_SIZE = 65536  # bytes per os.read() call in the read thread
 PTY_ENV_TERM = "xterm-256color"  # alias kept for explicit PTY usage

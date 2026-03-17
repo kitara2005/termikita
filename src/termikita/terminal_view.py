@@ -32,30 +32,17 @@ NSTextInputClient = objc.protocolNamed("NSTextInputClient")
 from termikita.constants import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
+    DEFAULT_THEME,
     TERMINAL_PADDING_X,
     TERMINAL_PADDING_Y,
     get_font_smoothing_enabled,
 )
 from termikita.input_handler import KEY_MAP
 from termikita.terminal_session import TerminalSession
-from termikita.unicode_utils import normalize_text
 from termikita.terminal_view_draw import TerminalViewDrawMixin
 from termikita.terminal_view_input import TerminalViewInputMixin
 from termikita.text_renderer import TextRenderer
-
-# Default theme — Phase 07 will load from JSON
-DEFAULT_THEME: dict = {
-    "foreground": (204, 204, 204),
-    "background": (30, 30, 30),
-    "cursor": (255, 255, 255),
-    "selection": (68, 68, 68),
-    "ansi": [
-        (0, 0, 0),       (204, 0, 0),     (0, 204, 0),     (204, 204, 0),
-        (0, 0, 204),     (204, 0, 204),   (0, 204, 204),   (204, 204, 204),
-        (128, 128, 128), (255, 0, 0),     (0, 255, 0),     (255, 255, 0),
-        (0, 0, 255),     (255, 0, 255),   (0, 255, 255),   (255, 255, 255),
-    ],
-}
+from termikita.unicode_utils import normalize_text
 
 
 class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protocols=[NSTextInputClient]):
@@ -85,7 +72,6 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         self._cursor_visible: bool = True
         self._cursor_blink_timer: object = None
         self._refresh_timer: object = None
-        self._back_buffer: object = None
         self._prev_cursor_pos: tuple[int, int] | None = None
         # Font smoothing preference from macOS system defaults
         self._font_smoothing: bool = get_font_smoothing_enabled()

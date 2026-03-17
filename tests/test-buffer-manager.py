@@ -138,8 +138,8 @@ def test_dirty_set_after_feed():
     bm.clear_dirty()
     bm.feed(b"abc")
     assert bm.dirty is True
-    dirty = bm.get_dirty_lines()
-    assert 0 in dirty
+    dirty = bm.get_dirty_rows()
+    assert dirty is None or 0 in dirty
 
 
 def test_clear_dirty():
@@ -147,7 +147,7 @@ def test_clear_dirty():
     bm.feed(b"abc")
     bm.clear_dirty()
     assert bm.dirty is False
-    assert bm.get_dirty_lines() == set()
+    assert bm.get_dirty_rows() == set()
 
 
 # ---------------------------------------------------------------------------

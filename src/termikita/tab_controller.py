@@ -22,36 +22,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from termikita.constants import (
+    DEFAULT_COLS,
+    DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_SIZE,
+    DEFAULT_ROWS,
+    DEFAULT_SCROLLBACK,
+    DEFAULT_THEME,
+)
 from termikita.terminal_session import TerminalSession
 from termikita.terminal_view import TerminalView
 from termikita.text_renderer import TextRenderer
-from termikita.constants import (
-    DEFAULT_COLS,
-    DEFAULT_ROWS,
-    DEFAULT_FONT_FAMILY,
-    DEFAULT_FONT_SIZE,
-    DEFAULT_SCROLLBACK,
-)
-
-TAB_BAR_HEIGHT: float = 28.0
 
 # Font zoom bounds and step (points)
 _FONT_SIZE_MIN = 8.0
 _FONT_SIZE_MAX = 36.0
 _FONT_SIZE_STEP = 1.0
-
-DEFAULT_THEME: dict = {
-    "foreground": (204, 204, 204),
-    "background": (30, 30, 30),
-    "cursor": (255, 255, 255),
-    "selection": (68, 68, 68),
-    "ansi": [
-        (0, 0, 0),       (204, 0, 0),     (0, 204, 0),     (204, 204, 0),
-        (0, 0, 204),     (204, 0, 204),   (0, 204, 204),   (204, 204, 204),
-        (128, 128, 128), (255, 0, 0),     (0, 255, 0),     (255, 255, 0),
-        (0, 0, 255),     (255, 0, 255),   (0, 255, 255),   (255, 255, 255),
-    ],
-}
 
 
 @dataclass
@@ -119,7 +105,7 @@ class TabController:
             scrollback_lines=scrollback,
         )
 
-        from AppKit import NSViewWidthSizable, NSViewHeightSizable  # type: ignore[import]
+        from AppKit import NSViewHeightSizable, NSViewWidthSizable  # type: ignore[import]
 
         bounds = self._content_view.bounds()
         view = TerminalView.alloc().initWithFrame_(bounds)
@@ -380,7 +366,7 @@ def _start_view_timers(view: TerminalView) -> None:
         pass
 
 
-from AppKit import NSObject, NSApp, NSCriticalRequest  # type: ignore[import]
+from AppKit import NSApp, NSCriticalRequest, NSObject  # type: ignore[import]
 
 
 class _DockBouncer(NSObject):

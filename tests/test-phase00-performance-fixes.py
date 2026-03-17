@@ -86,14 +86,12 @@ class TestGetDirtyRows:
         bm.clear_dirty()
         assert bm._force_full_redraw is False
 
-    def test_get_dirty_rows_vs_get_dirty_lines(self):
-        """get_dirty_rows() returns None (full) or set[int], get_dirty_lines() always returns set."""
+    def test_get_dirty_rows_full_redraw(self):
+        """get_dirty_rows() returns None when full redraw needed."""
         bm = BufferManager(cols=80, rows=24)
-        # Full redraw case
+        # Full redraw case — _force_full_redraw is True after init
         dirty_rows = bm.get_dirty_rows()
-        dirty_lines = bm.get_dirty_lines()
         assert dirty_rows is None
-        assert isinstance(dirty_lines, set)
 
     def test_dirty_rows_after_feed_and_clear(self):
         """Feed data → get_dirty_rows returns set with modified row indices."""

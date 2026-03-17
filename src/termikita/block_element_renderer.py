@@ -113,13 +113,16 @@ def _draw_block(cp: int, x: float, y: float, w: float, h: float) -> None:
 def _draw_shade(x: float, y: float, w: float, h: float, alpha: float) -> None:
     """Draw a shade character as semi-transparent fill over cell."""
     import AppKit  # type: ignore[import]
-    from AppKit import NSBezierPath, NSGraphicsContext  # type: ignore[import]
+    from AppKit import NSBezierPath, NSColor, NSGraphicsContext  # type: ignore[import]
 
     ctx = NSGraphicsContext.currentContext()
     if ctx is None:
         return
-    # Get current fill color and apply alpha
+    # Apply alpha to current fill color for semi-transparent shade effect
+    ctx.saveGraphicsState()
+    NSColor.colorWithCalibratedWhite_alpha_(1.0, alpha).set()
     NSBezierPath.fillRect_(AppKit.NSMakeRect(x, y, w, h))
+    ctx.restoreGraphicsState()
 
 
 def _draw_quadrant(cp: int, x: float, y: float, w: float, h: float) -> None:
