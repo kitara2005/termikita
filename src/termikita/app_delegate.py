@@ -267,9 +267,11 @@ class AppDelegate(NSObject):
         app_menu.addItemWithTitle_action_keyEquivalent_(
             "Quit " + APP_NAME, "terminate:", "q"
         )
-        app_menu_item = NSMenuItem.alloc().init()
-        app_menu_item.setSubmenu_(app_menu)
-        main_menu.addItem_(app_menu_item)
+        app_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            APP_NAME, None, ""
+        )
+        app_item.setSubmenu_(app_menu)
+        main_menu.addItem_(app_item)
 
         # Shell menu — tab and window management
         shell_menu = NSMenu.alloc().initWithTitle_("Shell")
@@ -283,9 +285,11 @@ class AppDelegate(NSObject):
         shell_menu.addItemWithTitle_action_keyEquivalent_(
             "Close Tab", "closeTab:", "w"
         )
-        shell_menu_item = NSMenuItem.alloc().init()
-        shell_menu_item.setSubmenu_(shell_menu)
-        main_menu.addItem_(shell_menu_item)
+        shell_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Shell", None, ""
+        )
+        shell_item.setSubmenu_(shell_menu)
+        main_menu.addItem_(shell_item)
 
         # Edit menu — clipboard + selection
         edit_menu = NSMenu.alloc().initWithTitle_("Edit")
@@ -298,18 +302,33 @@ class AppDelegate(NSObject):
         edit_menu.addItemWithTitle_action_keyEquivalent_(
             "Select All", "selectAll:", "a"
         )
-        edit_menu_item = NSMenuItem.alloc().init()
-        edit_menu_item.setSubmenu_(edit_menu)
-        main_menu.addItem_(edit_menu_item)
+        edit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Edit", None, ""
+        )
+        edit_item.setSubmenu_(edit_menu)
+        main_menu.addItem_(edit_item)
 
-        # View menu — font zoom
+        # View menu — font zoom + theme picker
         view_menu = NSMenu.alloc().initWithTitle_("View")
         view_menu.addItemWithTitle_action_keyEquivalent_("Bigger", "zoomIn:", "=")
         view_menu.addItemWithTitle_action_keyEquivalent_("Smaller", "zoomOut:", "-")
         view_menu.addItemWithTitle_action_keyEquivalent_("Default Size", "zoomReset:", "0")
-        view_menu_item = NSMenuItem.alloc().init()
-        view_menu_item.setSubmenu_(view_menu)
-        main_menu.addItem_(view_menu_item)
+        view_menu.addItem_(NSMenuItem.separatorItem())
+        # Theme submenu — dynamically lists available themes with checkmark
+        theme_submenu = NSMenu.alloc().initWithTitle_("Theme")
+        theme_submenu.setDelegate_(self)
+        self._theme_menu = theme_submenu  # keep ref for dynamic rebuild
+        self._rebuild_theme_menu()
+        theme_holder = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Theme", None, ""
+        )
+        theme_holder.setSubmenu_(theme_submenu)
+        view_menu.addItem_(theme_holder)
+        view_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "View", None, ""
+        )
+        view_item.setSubmenu_(view_menu)
+        main_menu.addItem_(view_item)
 
         # Format menu — font panel
         format_menu = NSMenu.alloc().initWithTitle_("Format")
@@ -317,21 +336,27 @@ class AppDelegate(NSObject):
         font_submenu.addItemWithTitle_action_keyEquivalent_(
             "Show Fonts", "orderFrontFontPanel:", ""
         )
-        font_item = NSMenuItem.alloc().init()
+        font_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Font", None, ""
+        )
         font_item.setSubmenu_(font_submenu)
         format_menu.addItem_(font_item)
-        format_menu_item = NSMenuItem.alloc().init()
-        format_menu_item.setSubmenu_(format_menu)
-        main_menu.addItem_(format_menu_item)
+        format_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Format", None, ""
+        )
+        format_item.setSubmenu_(format_menu)
+        main_menu.addItem_(format_item)
 
         # Window menu — standard window controls
         window_menu = NSMenu.alloc().initWithTitle_("Window")
         window_menu.addItemWithTitle_action_keyEquivalent_(
             "Minimize", "performMiniaturize:", "m"
         )
-        window_menu_item = NSMenuItem.alloc().init()
-        window_menu_item.setSubmenu_(window_menu)
-        main_menu.addItem_(window_menu_item)
+        window_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Window", None, ""
+        )
+        window_item.setSubmenu_(window_menu)
+        main_menu.addItem_(window_item)
 
         NSApp.setMainMenu_(main_menu)
 
@@ -375,6 +400,42 @@ class AppDelegate(NSObject):
     def zoomReset_(self, sender: object) -> None:
         """Cmd+0 — reset font size to default."""
         self._active_tab_ctrl().zoom_reset()
+
+    # ------------------------------------------------------------------
+    # Theme picker
+    # ------------------------------------------------------------------
+
+    def _rebuild_theme_menu(self) -> None:
+        """Populate theme submenu with available themes, checkmark on active."""
+        menu = self._theme_menu
+        menu.removeAllItems()
+        active = self._config.theme
+        for name in self._theme_mgr.get_theme_names():
+            # Human-readable label: "default-dark" → "Default Dark"
+            label = name.replace("-", " ").title()
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                label, "selectTheme:", ""
+            )
+            item.setRepresentedObject_(name)
+            item.setTarget_(self)
+            if name == active:
+                from AppKit import NSOnState  # type: ignore[import]
+                item.setState_(NSOnState)
+            menu.addItem_(item)
+
+    def selectTheme_(self, sender: object) -> None:
+        """Handle theme selection from View → Theme submenu."""
+        name = sender.representedObject()
+        if not name:
+            return
+        colors = self._theme_mgr.set_theme(name)
+        self._theme_colors = colors
+        self._config.set("theme", name)
+        self._config.save()
+        # Apply to all windows
+        for _win, tc in self._windows:
+            tc.set_theme(colors)
+        self._rebuild_theme_menu()
 
 
 def _parse_start_dir() -> str | None:

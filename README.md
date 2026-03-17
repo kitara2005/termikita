@@ -13,7 +13,7 @@ A native macOS terminal emulator built with Python and AppKit. Renders text with
 - **Full Unicode & Vietnamese IME** — NFC normalization, Telex/VNI input via NSTextInputClient
 - **256-color & 24-bit truecolor** — `TERM=xterm-256color`, `COLORTERM=truecolor`
 - **Multi-tab, multi-window** — independent sessions with per-tab PTY processes
-- **9 built-in themes** — Dracula, Nord, Solarized, Gruvbox, One Dark, Catppuccin, and more
+- **9 color themes** — Dracula, Nord, Solarized, Gruvbox, One Dark, Catppuccin — switch from View menu
 - **Nerd Font support** — auto-detects installed Nerd Fonts, PUA glyph isolation
 - **Finder integration** — right-click "Open in Termikita", drag folders to dock icon, `termikita://` URL scheme
 - **Dock bounce & notifications** — alerts when long-running commands finish in background
@@ -30,7 +30,7 @@ Grab the latest `Termikita.dmg` from [Releases](#), drag to Applications.
 
 ```bash
 # Clone & setup
-git clone https://github.com/user/termikita.git
+git clone https://github.com/kitara2005/termikita.git
 cd termikita
 python3 -m venv .venv
 source .venv/bin/activate
@@ -88,35 +88,31 @@ Font range: 8pt – 36pt. Changes persist across sessions.
 
 ### Color Themes
 
-9 built-in themes with 16 ANSI colors + foreground/background/cursor/selection:
+9 bundled themes. Switch instantly from **View → Theme** — active theme has a checkmark. Choice persists across sessions.
 
 | Theme | Style |
 |---|---|
-| default-dark | Light gray on dark — the default |
-| default-light | Dark text on light background |
-| dracula | Purple-accented dark theme |
-| nord | Arctic, blue-tinted palette |
-| solarized-dark | Ethan Schoonover's dark variant |
-| solarized-light | Ethan Schoonover's light variant |
-| gruvbox-dark | Retro warm dark theme |
-| one-dark | Atom One Dark |
-| catppuccin-mocha | Pastel dark, warm tones |
+| `default-dark` | Light gray on dark — the default |
+| `default-light` | Dark text on light background |
+| `dracula` | Purple-accented dark theme |
+| `nord` | Arctic, blue-tinted palette |
+| `solarized-dark` | Ethan Schoonover's dark variant |
+| `solarized-light` | Ethan Schoonover's light variant |
+| `gruvbox-dark` | Retro warm dark theme |
+| `one-dark` | Atom One Dark |
+| `catppuccin-mocha` | Pastel dark, warm tones |
 
-Themes are JSON files in `themes/`. Set active theme in config:
-
-```json
-{ "theme": "dracula" }
-```
+Custom themes: add a `.json` file to the `themes/` directory.
 
 ### Cursor
 
-Three cursor styles, all with optional blinking:
+Three cursor styles with blinking support:
 
 - **Block** — filled rectangle (default)
 - **Beam** — vertical I-beam
 - **Underline** — bottom line
 
-Applications can change cursor shape via `DECSCUSR` escape sequences. Cursor visibility (`DECTCEM`) is strictly respected — TUI frameworks like Ink/Claude Code that hide the terminal cursor and render their own work correctly.
+Cursor shape is controlled by applications via `DECSCUSR` escape sequences. Cursor visibility (`DECTCEM`) is strictly respected — TUI frameworks like Ink/Claude Code that hide the terminal cursor and render their own work correctly.
 
 ### Terminal Emulation
 
@@ -199,9 +195,6 @@ Settings are stored in `~/.config/termikita/config.json`:
   "font_size": 13.0,
   "theme": "default-dark",
   "scrollback_lines": 100000,
-  "cursor_style": "block",
-  "cursor_blink": true,
-  "line_height": 1.2,
   "window_width": 800,
   "window_height": 500,
   "shell": ""
@@ -212,11 +205,8 @@ Settings are stored in `~/.config/termikita/config.json`:
 |---|---|---|
 | `font_family` | `"SF Mono"` | Monospace font name |
 | `font_size` | `13.0` | Font size in points (8–36) |
-| `theme` | `"default-dark"` | Theme file name (without `.json`) |
+| `theme` | `"default-dark"` | Theme name (see [Color Themes](#color-themes)) |
 | `scrollback_lines` | `100000` | Maximum scrollback buffer lines |
-| `cursor_style` | `"block"` | `"block"`, `"beam"`, or `"underline"` |
-| `cursor_blink` | `true` | Enable cursor blinking |
-| `line_height` | `1.2` | Line height multiplier |
 | `window_width` | `800` | Initial window width (px) |
 | `window_height` | `500` | Initial window height (px) |
 | `shell` | `""` | Shell path; empty = `$SHELL` or `/bin/zsh` |
