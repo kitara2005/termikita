@@ -13,7 +13,7 @@ A native macOS terminal emulator built with Python and AppKit. Renders text with
 - **Full Unicode & Vietnamese IME** — NFC normalization, Telex/VNI input via NSTextInputClient
 - **256-color & 24-bit truecolor** — `TERM=xterm-256color`, `COLORTERM=truecolor`
 - **Multi-tab, multi-window** — independent sessions with per-tab PTY processes
-- **9 color themes** — Dracula, Nord, Solarized, Gruvbox, One Dark, Catppuccin — switch from View menu
+- **9 color themes** — Dracula, Nord, Solarized, Gruvbox, One Dark, Catppuccin Mocha, and more — switch from View menu
 - **Nerd Font support** — auto-detects installed Nerd Fonts, PUA glyph isolation
 - **Finder integration** — right-click "Open in Termikita", drag folders to dock icon, `termikita://` URL scheme
 - **Dock bounce & notifications** — alerts when long-running commands finish in background

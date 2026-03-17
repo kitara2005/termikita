@@ -16,13 +16,9 @@ DEFAULTS: dict[str, Any] = {
     "font_size": 13.0,
     "theme": "default-dark",
     "scrollback_lines": 100_000,
-    "cursor_style": "block",       # "block" | "beam" | "underline"
-    "cursor_blink": True,
-    "line_height": 1.2,            # line height multiplier
     "window_width": 800,           # pixels
     "window_height": 500,          # pixels
     "shell": "",                   # empty = auto-detect from $SHELL
-    "confirm_close": True,         # confirm before closing tab with running process
 }
 
 
@@ -105,18 +101,6 @@ class ConfigManager:
         return int(self._data.get("scrollback_lines", DEFAULTS["scrollback_lines"]))
 
     @property
-    def cursor_style(self) -> str:
-        return str(self._data.get("cursor_style", DEFAULTS["cursor_style"]))
-
-    @property
-    def cursor_blink(self) -> bool:
-        return bool(self._data.get("cursor_blink", DEFAULTS["cursor_blink"]))
-
-    @property
-    def line_height(self) -> float:
-        return float(self._data.get("line_height", DEFAULTS["line_height"]))
-
-    @property
     def window_width(self) -> int:
         return int(self._data.get("window_width", DEFAULTS["window_width"]))
 
@@ -128,6 +112,3 @@ class ConfigManager:
     def shell(self) -> str:
         return str(self._data.get("shell", DEFAULTS["shell"]))
 
-    @property
-    def confirm_close(self) -> bool:
-        return bool(self._data.get("confirm_close", DEFAULTS["confirm_close"]))

@@ -1,6 +1,6 @@
 """Termikita - Native macOS terminal emulator with full Unicode/Vietnamese support."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "Termikita"
 
 
