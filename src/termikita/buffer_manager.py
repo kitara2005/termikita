@@ -110,6 +110,9 @@ class TermikitaScreen(pyte.Screen):
         # Bell callback — invoked when BEL (\x07) arrives from PTY
         self._on_bell: object = None  # Callable[[], None] | None
         self._last_bell_time: float = 0.0
+        # Counter: how many lines were appended to scrollback during a feed() cycle.
+        # Used by BufferManager to adjust _scroll_offset and keep viewport stable.
+        self._scrollback_appended: int = 0
 
     def bell(self, *args) -> None:
         """Handle BEL character — trigger dock bounce / notification.
@@ -179,6 +182,7 @@ class TermikitaScreen(pyte.Screen):
         if (top == 0 and self.cursor.y == bottom
                 and not self.in_alternate_screen and not self._resizing):
             self._scrollback.append(self.capture_line(0))
+            self._scrollback_appended += 1
         super().index()
 
     def capture_line(self, row: int) -> list[CellData]:
@@ -272,11 +276,13 @@ class BufferManager:
         text = _SCO_SAVE_RE.sub("\x1b7", text)
         text = _SCO_RESTORE_RE.sub("\x1b8", text)
 
+        self._screen._scrollback_appended = 0
         self._stream.feed(text)
-        # Auto-scroll to bottom on new data (iTerm2 behavior) — prevents
-        # viewport drift when scrollback grows while user is scrolled up.
-        if self._scroll_offset > 0:
-            self._scroll_offset = 0
+        # Keep viewport stable when scrolled up (iTerm2/Alacritty/Kitty behavior):
+        # as new lines enter scrollback, bump offset so user sees the same content.
+        if self._scroll_offset > 0 and self._screen._scrollback_appended > 0:
+            self._scroll_offset += self._screen._scrollback_appended
+            self._scroll_offset = min(self._scroll_offset, len(self._scrollback))
             self._force_full_redraw = True
         self._visible_cache_valid = False
         self._has_new_output = True
