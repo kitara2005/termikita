@@ -30,6 +30,7 @@ from termikita.constants import (
     DEFAULT_ROWS,
     DEFAULT_FONT_FAMILY,
     DEFAULT_FONT_SIZE,
+    DEFAULT_SCROLLBACK,
 )
 
 TAB_BAR_HEIGHT: float = 28.0
@@ -103,6 +104,9 @@ class TabController:
         renderer.set_font(font_family, font_size)
         cols, rows = self._grid_size(renderer)
 
+        # Read shell and scrollback from config if available
+        shell = self._config.shell if self._config else ""
+        scrollback = self._config.scrollback_lines if self._config else DEFAULT_SCROLLBACK
         session = TerminalSession(
             cols=cols,
             rows=rows,
@@ -111,6 +115,8 @@ class TabController:
             on_exit=self._on_tab_exit,
             on_activity=_request_user_attention,
             working_dir=working_dir,
+            shell=shell or None,
+            scrollback_lines=scrollback,
         )
 
         from AppKit import NSViewWidthSizable, NSViewHeightSizable  # type: ignore[import]

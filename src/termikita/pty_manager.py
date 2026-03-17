@@ -59,6 +59,7 @@ class PTYManager:
         on_output: Callable[[bytes], None],
         on_exit: Optional[Callable[[int], None]] = None,
         working_dir: Optional[str] = None,
+        shell: Optional[str] = None,
     ) -> None:
         """Spawn the user's shell and start the background read thread.
 
@@ -69,6 +70,7 @@ class PTYManager:
             on_exit: Optional callback invoked with the exit code when the
                      child process terminates.
             working_dir: Optional starting directory for the shell process.
+            shell: Optional shell path override; empty/None = auto-detect.
         """
         self._on_output = on_output
         self._on_exit = on_exit
@@ -77,7 +79,8 @@ class PTYManager:
         self._child_pid: Optional[int] = None
         self._read_thread: Optional[threading.Thread] = None
 
-        self._spawn(get_user_shell(), cols, rows, _build_child_env(), working_dir)
+        shell_path = shell if shell and os.path.exists(shell) else get_user_shell()
+        self._spawn(shell_path, cols, rows, _build_child_env(), working_dir)
 
     # ------------------------------------------------------------------
     # Public API

@@ -19,6 +19,7 @@ from AppKit import (  # type: ignore[import]
     NSCursor,
     NSEventModifierFlagCommand,
     NSEventModifierFlagControl,
+    NSEventModifierFlagShift,
     NSView,
 )
 from Foundation import NSNotFound, NSTimer  # type: ignore[import]
@@ -361,6 +362,8 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         if not chars:
             return
         key = chars[0].lower()
+        mods = event.modifierFlags()
+        has_shift = bool(mods & NSEventModifierFlagShift)
         if key == "c":
             if self._selection_start and self._selection_end:
                 self._copy_selection()
@@ -372,6 +375,26 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
             self._select_all()
         elif key == "k":
             self._session.write(b"\x0c")
+        elif key == "]" and has_shift:
+            self._dispatch_tab_action("next_tab")
+        elif key == "[" and has_shift:
+            self._dispatch_tab_action("prev_tab")
+        elif key.isdigit() and "1" <= key <= "9":
+            self._dispatch_tab_action("select_tab", int(key) - 1)
+
+    def _dispatch_tab_action(self, action: str, arg: object = None) -> None:
+        """Forward tab actions to TabController via responder chain."""
+        from AppKit import NSApp  # type: ignore[import]
+        delegate = NSApp.delegate()
+        if delegate is None:
+            return
+        tc = delegate._active_tab_ctrl()
+        if action == "next_tab":
+            tc.next_tab()
+        elif action == "prev_tab":
+            tc.prev_tab()
+        elif action == "select_tab" and arg is not None:
+            tc.select_tab(arg)
 
     # ------------------------------------------------------------------
     # Cleanup

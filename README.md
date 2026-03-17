@@ -98,7 +98,7 @@ Font range: 8pt – 36pt. Changes persist across sessions.
 | `one-dark` | Atom One Dark |
 | `catppuccin-mocha` | Pastel dark, warm tones |
 
-Custom themes: add a `.json` file to the `themes/` directory.
+Custom themes: add a `.json` file to `themes/` when running from source. In built `.app` bundles, themes are inside `Resources/themes/`.
 
 ### Cursor
 
@@ -245,7 +245,7 @@ Termikita sets these for child processes:
 |---|---|
 | `TERM` | `xterm-256color` |
 | `COLORTERM` | `truecolor` |
-| `LANG` | `en_US.UTF-8` |
+| `LANG` | `en_US.UTF-8` (if not already set) |
 | `PROMPT_EOL_MARK` | `""` (suppresses zsh `%`) |
 
 ---

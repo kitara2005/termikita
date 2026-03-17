@@ -58,6 +58,8 @@ class TerminalSession:
         on_exit: Optional[Callable[[int], None]] = None,
         on_activity: Optional[Callable[[], None]] = None,
         working_dir: Optional[str] = None,
+        shell: Optional[str] = None,
+        scrollback_lines: int = DEFAULT_SCROLLBACK,
     ) -> None:
         """Create buffer + PTY and start the shell.
 
@@ -73,6 +75,8 @@ class TerminalSession:
             on_activity: Optional callback invoked when a command likely finished
                 (output after prolonged silence). Used for dock bounce / notification.
             working_dir: Optional starting directory for the shell process.
+            shell: Optional shell path override; empty/None = auto-detect.
+            scrollback_lines: Maximum scrollback buffer size.
         """
         self.cols = cols
         self.rows = rows
@@ -95,9 +99,10 @@ class TerminalSession:
             on_output=self._handle_pty_output,
             on_exit=self._handle_pty_exit,
             working_dir=working_dir,
+            shell=shell,
         )
         self.buffer = BufferManager(
-            cols, rows, DEFAULT_SCROLLBACK,
+            cols, rows, scrollback_lines,
             on_bell=on_activity,
             on_query_response=self.pty.write,
         )
