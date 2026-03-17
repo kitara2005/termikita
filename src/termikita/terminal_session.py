@@ -20,9 +20,9 @@ from termikita.constants import (
 
 # Silence threshold: output arriving after this many seconds of quiet
 # suggests a command just finished (shell printed its prompt).
-_SILENCE_THRESHOLD: float = 2.0
+_SILENCE_THRESHOLD: float = 1.0
 # Cooldown between activity notifications to avoid rapid repeated bounces.
-_ACTIVITY_COOLDOWN: float = 5.0
+_ACTIVITY_COOLDOWN: float = 3.0
 
 
 class TerminalSession:

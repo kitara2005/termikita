@@ -374,16 +374,21 @@ def _start_view_timers(view: TerminalView) -> None:
         pass
 
 
-from AppKit import NSObject, NSApp, NSInformationalRequest  # type: ignore[import]
+from AppKit import NSObject, NSApp, NSCriticalRequest  # type: ignore[import]
 
 
 class _DockBouncer(NSObject):
-    """Helper to dispatch dock bounce to main thread via performSelectorOnMainThread."""
+    """Dispatch dock bounce to main thread via performSelectorOnMainThread.
+
+    NSApp.requestUserAttention_ must be called from the main thread for
+    reliable behavior. This helper bridges PTY read thread → main thread.
+    """
 
     def bounce_(self, _sender: object) -> None:
         try:
             if not NSApp.isActive():
-                NSApp.requestUserAttention_(NSInformationalRequest)
+                # NSCriticalRequest = continuous bounce until user clicks dock icon
+                NSApp.requestUserAttention_(NSCriticalRequest)
         except Exception:
             pass
 
