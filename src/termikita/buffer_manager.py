@@ -296,7 +296,12 @@ class BufferManager:
         text = _SCO_RESTORE_RE.sub("\x1b8", text)
 
         self._screen._scrollback_appended = 0
+        was_alt = self._screen.in_alternate_screen
         self._stream.feed(text)
+        # Reset scroll offset on alternate screen enter — TUI apps own the viewport
+        if not was_alt and self._screen.in_alternate_screen:
+            self._scroll_offset = 0
+            self._force_full_redraw = True
         # Keep viewport stable when scrolled up (iTerm2/Alacritty/Kitty behavior):
         # as new lines enter scrollback, bump offset so user sees the same content.
         if self._scroll_offset > 0 and self._screen._scrollback_appended > 0:
@@ -315,6 +320,10 @@ class BufferManager:
             return self._visible_cache
 
         rows = self._screen.lines
+        # Alternate screen apps (Claude Code, vim, less) own the full viewport.
+        # Never show scrollback — always render the live screen buffer.
+        if self._screen.in_alternate_screen and self._scroll_offset != 0:
+            self._scroll_offset = 0
         if self._scroll_offset == 0:
             # Reuse existing cache list structure if size matches — avoids
             # allocating a new list object every frame under streaming output.
@@ -419,7 +428,10 @@ class BufferManager:
     # User scroll controls
     # ------------------------------------------------------------------
     def scroll_up(self, lines: int = 3) -> None:
-        """Scroll viewport up into scrollback history. Clamped to available scrollback."""
+        """Scroll viewport up into scrollback history. Clamped to available scrollback.
+        Blocked in alternate screen — TUI apps handle their own scrolling."""
+        if self._screen.in_alternate_screen:
+            return
         max_offset = len(self._scrollback)
         if max_offset == 0:
             return
