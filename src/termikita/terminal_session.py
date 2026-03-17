@@ -147,7 +147,22 @@ class TerminalSession:
                     pass
         self._last_output_time = now
 
+        # Track alternate screen state before feed — TUI apps (Claude Code,
+        # vim, etc.) exit alternate screen (DECRST 1049) when they finish.
+        # This is a reliable "command finished" signal even without a silence gap.
+        was_alt = self.buffer._screen.in_alternate_screen
         self.buffer.feed(data)
+        is_alt = self.buffer._screen.in_alternate_screen
+        if (
+            was_alt and not is_alt
+            and self._on_activity is not None
+            and now - self._last_notify_time > _ACTIVITY_COOLDOWN
+        ):
+            self._last_notify_time = now
+            try:
+                self._on_activity()
+            except Exception:
+                pass
 
         # Notify title change if OSC 2 updated the screen title
         if self._on_title_change is not None:
