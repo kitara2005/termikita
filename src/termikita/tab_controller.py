@@ -378,7 +378,7 @@ from AppKit import NSObject, NSApp, NSCriticalRequest  # type: ignore[import]
 
 
 class _DockBouncer(NSObject):
-    """Dispatch dock bounce to main thread via performSelectorOnMainThread.
+    """Dispatch dock bounce + macOS notification to main thread.
 
     NSApp.requestUserAttention_ must be called from the main thread for
     reliable behavior. This helper bridges PTY read thread → main thread.
@@ -387,8 +387,9 @@ class _DockBouncer(NSObject):
     def bounce_(self, _sender: object) -> None:
         try:
             if not NSApp.isActive():
-                # NSCriticalRequest = continuous bounce until user clicks dock icon
+                # Continuous bounce until user clicks dock icon
                 NSApp.requestUserAttention_(NSCriticalRequest)
+                _post_notification()
         except Exception:
             pass
 
@@ -397,8 +398,25 @@ class _DockBouncer(NSObject):
 _bouncer = _DockBouncer.alloc().init()
 
 
+def _post_notification() -> None:
+    """Post a macOS notification banner via NSUserNotification."""
+    try:
+        from Foundation import (  # type: ignore[import]
+            NSUserNotification,
+            NSUserNotificationCenter,
+        )
+        notif = NSUserNotification.alloc().init()
+        notif.setTitle_("Termikita")
+        notif.setInformativeText_("Command completed")
+        notif.setSoundName_(None)  # silent — dock bounce is enough audio cue
+        center = NSUserNotificationCenter.defaultUserNotificationCenter()
+        center.deliverNotification_(notif)
+    except Exception:
+        pass
+
+
 def _request_user_attention() -> None:
-    """Bounce dock icon when a command likely finished.
+    """Bounce dock icon + show notification when a command likely finished.
 
     Called from PTY read thread — dispatch to main thread for reliable
     NSApp.isActive() and requestUserAttention_ behavior.

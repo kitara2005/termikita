@@ -20,9 +20,13 @@ from termikita.constants import (
 
 # Silence threshold: output arriving after this many seconds of quiet
 # suggests a command just finished (shell printed its prompt).
-_SILENCE_THRESHOLD: float = 1.0
-# Cooldown between activity notifications to avoid rapid repeated bounces.
-_ACTIVITY_COOLDOWN: float = 3.0
+# 2s avoids false positives from TUI apps pausing to "think".
+_SILENCE_THRESHOLD: float = 2.0
+# Cooldown between silence-based notifications to avoid rapid repeated bounces.
+_SILENCE_COOLDOWN: float = 5.0
+# Alt-screen exit is a definitive "done" signal (TUI apps like Claude Code).
+# Short cooldown just prevents double-fire from chunked output.
+_ALT_EXIT_COOLDOWN: float = 1.0
 
 
 class TerminalSession:
@@ -79,15 +83,23 @@ class TerminalSession:
         self._prev_title: str = ""
         # Track output timing for "command finished" heuristic
         self._last_output_time: float = 0.0
-        self._last_notify_time: float = 0.0
+        # Independent cooldowns: silence detection vs alt-screen exit
+        self._last_silence_notify: float = 0.0
+        self._last_alt_exit_notify: float = 0.0
 
-        self.buffer = BufferManager(cols, rows, DEFAULT_SCROLLBACK, on_bell=on_activity)
+        # PTY created first so buffer can reference its write method
+        # for terminal query responses (DA1, DSR).
         self.pty = PTYManager(
             cols,
             rows,
             on_output=self._handle_pty_output,
             on_exit=self._handle_pty_exit,
             working_dir=working_dir,
+        )
+        self.buffer = BufferManager(
+            cols, rows, DEFAULT_SCROLLBACK,
+            on_bell=on_activity,
+            on_query_response=self.pty.write,
         )
         self.is_alive: bool = True
 
@@ -131,16 +143,17 @@ class TerminalSession:
         will detect buffer.dirty and call setNeedsDisplay_ — no ObjC cross-
         thread dispatch required.
         """
-        # Detect "output after silence" — a command likely just finished
+        # Detect "output after silence" — a command likely just finished.
+        # Uses its own cooldown so it doesn't suppress alt-screen exit.
         now = time.monotonic()
         if self._last_output_time > 0:
             silence = now - self._last_output_time
             if (
                 silence > _SILENCE_THRESHOLD
-                and now - self._last_notify_time > _ACTIVITY_COOLDOWN
+                and now - self._last_silence_notify > _SILENCE_COOLDOWN
                 and self._on_activity is not None
             ):
-                self._last_notify_time = now
+                self._last_silence_notify = now
                 try:
                     self._on_activity()
                 except Exception:
@@ -149,20 +162,24 @@ class TerminalSession:
 
         # Track alternate screen state before feed — TUI apps (Claude Code,
         # vim, etc.) exit alternate screen (DECRST 1049) when they finish.
-        # This is a reliable "command finished" signal even without a silence gap.
+        # This is the most reliable "command finished" signal. Independent
+        # cooldown ensures it's never suppressed by silence-based detection.
         was_alt = self.buffer._screen.in_alternate_screen
         self.buffer.feed(data)
         is_alt = self.buffer._screen.in_alternate_screen
         if (
             was_alt and not is_alt
             and self._on_activity is not None
-            and now - self._last_notify_time > _ACTIVITY_COOLDOWN
         ):
-            self._last_notify_time = now
-            try:
-                self._on_activity()
-            except Exception:
-                pass
+            now_after = time.monotonic()
+            if now_after - self._last_alt_exit_notify > _ALT_EXIT_COOLDOWN:
+                self._last_alt_exit_notify = now_after
+                # Also reset silence cooldown to prevent immediate double-bounce
+                self._last_silence_notify = now_after
+                try:
+                    self._on_activity()
+                except Exception:
+                    pass
 
         # Notify title change if OSC 2 updated the screen title
         if self._on_title_change is not None:
