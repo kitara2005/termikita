@@ -22,6 +22,12 @@ A native macOS terminal emulator built with Python and AppKit. Renders text with
 
 ## Installation
 
+### Download
+
+Grab the latest DMG from [**Releases**](https://github.com/kitara2005/termikita/releases/latest) — open it and drag Termikita to Applications.
+
+**Requirements:** macOS 13.0 (Ventura) or later.
+
 ### Build from source
 
 ```bash
