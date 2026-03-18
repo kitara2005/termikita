@@ -49,8 +49,8 @@ OPTIONS = {
         "CFBundleName": "Termikita",
         "CFBundleDisplayName": "Termikita",
         "CFBundleIdentifier": "com.termikita.app",
-        "CFBundleVersion": "0.1.2",
-        "CFBundleShortVersionString": "0.1.2",
+        "CFBundleVersion": "0.1.3",
+        "CFBundleShortVersionString": "0.1.3",
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
         # Allow opening folders from Finder (drag to dock, "Open With")
