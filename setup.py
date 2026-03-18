@@ -68,6 +68,31 @@ OPTIONS = {
                 "CFBundleURLSchemes": ["termikita"],
             },
         ],
+        # TCC privacy usage descriptions — required for child processes
+        # running inside the terminal to request system permissions.
+        # Without these, macOS silently denies access (no dialog shown).
+        "NSMicrophoneUsageDescription":
+            "An application in Termikita wants to use your microphone.",
+        "NSCameraUsageDescription":
+            "An application in Termikita wants to use your camera.",
+        "NSAppleEventsUsageDescription":
+            "An application in Termikita wants to control other applications.",
+        "NSLocationWhenInUseUsageDescription":
+            "An application in Termikita wants to use your location.",
+        "NSDesktopFolderUsageDescription":
+            "An application in Termikita wants to access your Desktop folder.",
+        "NSDocumentsFolderUsageDescription":
+            "An application in Termikita wants to access your Documents folder.",
+        "NSDownloadsFolderUsageDescription":
+            "An application in Termikita wants to access your Downloads folder.",
+        "NSRemovableVolumesUsageDescription":
+            "An application in Termikita wants to access removable volumes.",
+        "NSContactsUsageDescription":
+            "An application in Termikita wants to access your contacts.",
+        "NSCalendarsUsageDescription":
+            "An application in Termikita wants to access your calendars.",
+        "NSPhotoLibraryUsageDescription":
+            "An application in Termikita wants to access your photos.",
         # NSServices — "New Termikita Tab Here" in Finder right-click menu
         # Like iTerm2, registered in Info.plist for auto-discovery (no user config)
         "NSServices": [
