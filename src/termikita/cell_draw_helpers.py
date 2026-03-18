@@ -136,11 +136,11 @@ def _build_fallback_attr_str(text: str, primary_font: object, fg_color: object) 
             for ch in text:
                 ch_len = 2 if ord(ch) > 0xFFFF else 1  # UTF-16 code units
                 cp = ord(ch)
-                # Skip per-char fallback for U+2000-U+2FFF (symbols, geometric,
-                # box drawing, dingbats). The font cascade list (Apple Symbols,
-                # Menlo, Lucida Grande) renders these at correct size/weight.
-                # Only use per-char fallback for CJK (U+3000+), PUA, supplementary.
-                if cp >= 0x3000 or (0xE000 <= cp <= 0xF8FF) or cp > 0xFFFF:
+                # Per-char fallback for symbols (U+2000+), CJK (U+3000+),
+                # PUA (U+E000-U+F8FF), and supplementary plane chars.
+                # Includes geometric shapes and box drawing (U+2000-U+2FFF)
+                # which the font cascade may not fully cover.
+                if cp >= 0x2000 or (0xE000 <= cp <= 0xF8FF) or cp > 0xFFFF:
                     cache_key = (cp, font_id)
                     fallback = _FONT_FALLBACK_CACHE.get(cache_key)
                     if fallback is None:
