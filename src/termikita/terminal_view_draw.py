@@ -209,6 +209,7 @@ class TerminalViewDrawMixin:
         dirty_rows = session.buffer.get_dirty_rows()
 
         py = TERMINAL_PADDING_Y
+        h = self.bounds().size.height
         if dirty_rows is None:
             self.setNeedsDisplay_(True)
             session.buffer.clear_dirty()
@@ -220,6 +221,13 @@ class TerminalViewDrawMixin:
             # Always invalidate cursor row so blink and visibility changes render
             self.setNeedsDisplayInRect_(NSMakeRect(0, py + cursor_row * ch, w, ch))
             session.buffer.clear_dirty()
+
+        # Invalidate area below last terminal row — prevents stale content
+        # from normal screen showing below alternate screen TUI apps.
+        rows = session.buffer._screen.lines
+        bottom_of_grid = py + rows * ch
+        if bottom_of_grid < h:
+            self.setNeedsDisplayInRect_(NSMakeRect(0, bottom_of_grid, w, h - bottom_of_grid))
 
     def blinkCursor_(self, timer: object) -> None:
         """Toggle cursor visibility — invalidate only the cursor cell."""
