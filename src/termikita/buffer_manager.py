@@ -237,6 +237,7 @@ class BufferManager:
 
         self._scroll_offset: int = 0
         self._synchronized: bool = False       # DEC 2026 batch mode
+        self._sync_end_time: float = 0.0       # monotonic time of last sync_end
         self._osc8_current_url: str | None = None
         self._cursor_style: str = "block"      # DECSCUSR cursor shape (default=block)
         self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
@@ -260,11 +261,21 @@ class BufferManager:
         text = self._utf8_decoder.decode(data, False)
         text = normalize_text(text)  # NFC for Vietnamese diacritics
 
-        # DEC 2026 synchronized output detection
-        if _SYNC_BEGIN_RE.search(text):
+        # DEC 2026 synchronized output detection — use LAST occurrence position.
+        # When a chunk contains both sync_end (from previous frame) and sync_begin
+        # (for current frame), the last marker determines whether we're mid-batch.
+        # Without position tracking, sync_end would incorrectly override sync_begin,
+        # causing the refresh timer to render intermediate (erased) states = flicker.
+        sync_begins = list(_SYNC_BEGIN_RE.finditer(text))
+        sync_ends = list(_SYNC_END_RE.finditer(text))
+        last_begin = sync_begins[-1].start() if sync_begins else -1
+        last_end = sync_ends[-1].start() if sync_ends else -1
+        if last_begin > last_end:
             self._synchronized = True
-        if _SYNC_END_RE.search(text):
+        elif last_end > last_begin:
             self._synchronized = False
+            import time
+            self._sync_end_time = time.monotonic()
 
         # DECTCEM cursor show/hide — track LAST occurrence to get final state.
         # When both show+hide appear in same chunk (e.g. Claude Code rendering),
@@ -507,8 +518,25 @@ class BufferManager:
 
     @property
     def synchronized(self) -> bool:
-        """True while DEC 2026 synchronized output is active (suppress redraws)."""
-        return self._synchronized
+        """True while DEC 2026 synchronized output is active (suppress redraws).
+
+        Also returns True for a brief grace period (8ms) after sync_end.
+        TUI apps like Claude Code/Ink send rapid frame updates where the gap
+        between sync_end and the next sync_begin is just a few milliseconds.
+        Without the grace period, the refresh timer could render a frame that's
+        about to be immediately replaced, causing visible flicker on animated
+        elements (spinners, status indicators).
+        """
+        if self._synchronized:
+            return True
+        # Grace period: suppress render for 8ms after sync_end to coalesce
+        # back-to-back Ink frames. Only applies in alternate screen where
+        # TUI apps run; normal shell output renders immediately.
+        if self._sync_end_time > 0 and self._screen.in_alternate_screen:
+            import time
+            if time.monotonic() - self._sync_end_time < 0.008:
+                return True
+        return False
 
     @property
     def cursor(self) -> tuple[int, int]:

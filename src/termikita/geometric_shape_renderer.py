@@ -1,19 +1,25 @@
 """Geometric shape renderer for common Unicode symbols used in terminal UIs.
 
-Monospace fonts often lack geometric shape glyphs (●, ■, ◆, etc.), causing
+Monospace fonts often lack geometric shape glyphs (■, ◆, etc.), causing
 CoreText cascade to silently use Apple Symbols (proportional font) which
 renders shapes smaller than the monospace cell grid. Drawing them
 geometrically ensures consistent sizing matching Terminal.app behavior.
 
 This matches the approach used by kitty and Alacritty for geometric shapes.
 
+Note: ● (U+25CF) and ○ (U+25CB) are intentionally NOT drawn geometrically.
+They render as font glyphs (like iTerm2) so TUI spinner/status indicators
+(e.g. Claude Code's Ink UI) don't flash large colored circles on rapid updates.
+
 Supported characters:
-  ● ○ ■ □ ◆ ◇ ▲ ▶ ▼ ◀
+  ■ □ ◆ ◇ ▲ ▶ ▼ ◀
 """
 
 from __future__ import annotations
 
-# Codepoints drawn geometrically instead of via font glyphs
+# Codepoints drawn geometrically instead of via font glyphs.
+# Note: ● (0x25CF) and ○ (0x25CB) excluded — rendered as font glyphs to avoid
+# large colored circles flashing during TUI spinner/status updates (Claude Code).
 GEOMETRIC_SHAPES: set[int] = {
     0x25A0,  # ■ BLACK SQUARE
     0x25A1,  # □ WHITE SQUARE
@@ -23,8 +29,6 @@ GEOMETRIC_SHAPES: set[int] = {
     0x25C0,  # ◀ BLACK LEFT-POINTING TRIANGLE
     0x25C6,  # ◆ BLACK DIAMOND
     0x25C7,  # ◇ WHITE DIAMOND
-    0x25CB,  # ○ WHITE CIRCLE
-    0x25CF,  # ● BLACK CIRCLE
 }
 
 
@@ -47,20 +51,7 @@ def draw_geometric(cp: int, x: float, y: float, w: float, h: float) -> None:
     cx = x + w / 2
     cy = y + h / 2
 
-    if cp == 0x25CF:  # ● BLACK CIRCLE
-        path = NSBezierPath.bezierPathWithOvalInRect_(
-            AppKit.NSMakeRect(sx, sy, sw, sh)
-        )
-        path.fill()
-
-    elif cp == 0x25CB:  # ○ WHITE CIRCLE
-        path = NSBezierPath.bezierPathWithOvalInRect_(
-            AppKit.NSMakeRect(sx, sy, sw, sh)
-        )
-        path.setLineWidth_(1.0)
-        path.stroke()
-
-    elif cp == 0x25A0:  # ■ BLACK SQUARE
+    if cp == 0x25A0:  # ■ BLACK SQUARE
         NSBezierPath.fillRect_(AppKit.NSMakeRect(sx, sy, sw, sh))
 
     elif cp == 0x25A1:  # □ WHITE SQUARE
