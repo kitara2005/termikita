@@ -275,6 +275,11 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         if modifiers & NSEventModifierFlagCommand:
             self._handle_cmd_shortcut(event)
             return
+        # Scroll-to-bottom-on-input (WezTerm behavior): when user types while
+        # scrolled up, snap to bottom so they can see their input. Uses thread-safe
+        # flag that the PTY thread picks up in feed().
+        if hasattr(self, "_session") and self._session:
+            self._session.buffer.request_scroll_to_bottom()
         # Ctrl+letter → control character (0x01-0x1A)
         if modifiers & NSEventModifierFlagControl:
             chars = event.characters()

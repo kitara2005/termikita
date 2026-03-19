@@ -242,6 +242,9 @@ class BufferManager:
         self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
         self._force_full_redraw: bool = True   # first frame needs full draw
         self._has_new_output: bool = False     # set True in feed(), cleared by renderer
+        # Thread-safe scroll-to-bottom request: main thread sets True (on user input),
+        # PTY thread reads and clears in feed() before viewport stabilization.
+        self._snap_to_bottom: bool = False
         # Incremental UTF-8 decoder — buffers incomplete multi-byte sequences
         # across os.read() boundaries instead of replacing them with U+FFFD
         self._utf8_decoder = codecs.getincrementaldecoder("utf-8")("ignore")
@@ -297,6 +300,14 @@ class BufferManager:
 
         self._screen._scrollback_appended = 0
         was_alt = self._screen.in_alternate_screen
+
+        # Handle snap-to-bottom request from main thread (scroll-to-bottom-on-input).
+        # Must be checked BEFORE _stream.feed() to avoid race with viewport stabilization.
+        if self._snap_to_bottom:
+            self._scroll_offset = 0
+            self._snap_to_bottom = False
+            self._force_full_redraw = True
+
         self._stream.feed(text)
         # Reset scroll offset on alternate screen enter — TUI apps own the viewport
         if not was_alt and self._screen.in_alternate_screen:
@@ -321,10 +332,12 @@ class BufferManager:
 
         rows = self._screen.lines
         # Alternate screen apps (Claude Code, vim, less) own the full viewport.
-        # Never show scrollback — always render the live screen buffer.
-        if self._screen.in_alternate_screen and self._scroll_offset != 0:
-            self._scroll_offset = 0
-        if self._scroll_offset == 0:
+        # Never show scrollback — use a local variable to avoid mutating
+        # _scroll_offset from the main thread (race condition with PTY thread's feed()).
+        effective_offset = self._scroll_offset
+        if self._screen.in_alternate_screen:
+            effective_offset = 0
+        if effective_offset == 0:
             # Reuse existing cache list structure if size matches — avoids
             # allocating a new list object every frame under streaming output.
             if self._visible_cache is not None and len(self._visible_cache) == rows:
@@ -335,7 +348,7 @@ class BufferManager:
                 result = [self._screen.capture_line(r) for r in range(rows)]
         else:
             sb = list(self._scrollback)          # oldest → newest
-            sb_start = max(0, len(sb) - self._scroll_offset)
+            sb_start = max(0, len(sb) - effective_offset)
             window = sb[sb_start : sb_start + rows]
             if len(window) >= rows:
                 result = window[:rows]
@@ -448,6 +461,16 @@ class BufferManager:
         self._scroll_offset = 0
         self._force_full_redraw = True
         self._visible_cache_valid = False
+
+    def request_scroll_to_bottom(self) -> None:
+        """Thread-safe scroll-to-bottom for user input events (WezTerm behavior).
+
+        Sets a flag that the PTY thread picks up in feed() before viewport
+        stabilization. This avoids a race where feed() could bump the offset
+        back up after the main thread resets it.
+        """
+        if self._scroll_offset > 0:
+            self._snap_to_bottom = True
 
     # ------------------------------------------------------------------
     # Resize

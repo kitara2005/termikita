@@ -41,6 +41,8 @@ class TerminalViewInputMixin:
         self._marked_range = (NSNotFound, 0)
 
         if text:
+            # Scroll-to-bottom-on-input for IME committed text
+            self._session.buffer.request_scroll_to_bottom()
             self._session.write(normalize_text(text).encode("utf-8"))
         self.setNeedsDisplay_(True)
 
