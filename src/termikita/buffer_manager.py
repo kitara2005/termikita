@@ -30,6 +30,10 @@ _OSC8_CLOSE_RE = re.compile(r"\x1b]8;;\x07")
 _SYNC_BEGIN_RE = re.compile(r"\x1b\[\?2026h")
 _SYNC_END_RE = re.compile(r"\x1b\[\?2026l")
 
+# Bracketed paste mode  ESC [ ? 2004 h / l
+_BRACKETED_PASTE_ON_RE = re.compile(r"\x1b\[\?2004h")
+_BRACKETED_PASTE_OFF_RE = re.compile(r"\x1b\[\?2004l")
+
 # DECSCUSR — cursor shape: ESC [ Ps SP q
 _DECSCUSR_RE = re.compile(r"\x1b\[([0-6]?) q")
 _CURSOR_STYLE_MAP = {
@@ -237,6 +241,7 @@ class BufferManager:
 
         self._scroll_offset: int = 0
         self._synchronized: bool = False       # DEC 2026 batch mode
+        self._bracketed_paste: bool = False    # DEC 2004 bracketed paste mode
         self._osc8_current_url: str | None = None
         self._cursor_style: str = "block"      # DECSCUSR cursor shape (default=block)
         self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
@@ -273,6 +278,13 @@ class BufferManager:
             self._synchronized = True
         elif last_end > last_begin:
             self._synchronized = False
+
+        # Bracketed paste mode (DEC 2004) — apps request this to distinguish
+        # typed input from pasted text, preventing paste injection attacks.
+        if _BRACKETED_PASTE_ON_RE.search(text):
+            self._bracketed_paste = True
+        if _BRACKETED_PASTE_OFF_RE.search(text):
+            self._bracketed_paste = False
 
         # DECTCEM cursor show/hide — track LAST occurrence to get final state.
         # When both show+hide appear in same chunk (e.g. Claude Code rendering),
@@ -512,6 +524,11 @@ class BufferManager:
     def is_at_bottom(self) -> bool:
         """True when viewport is at the latest output (not scrolled back)."""
         return self._scroll_offset == 0
+
+    @property
+    def bracketed_paste(self) -> bool:
+        """True when the shell/app has enabled bracketed paste mode (DEC 2004)."""
+        return self._bracketed_paste
 
     @property
     def synchronized(self) -> bool:

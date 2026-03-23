@@ -174,7 +174,13 @@ class TerminalViewInputMixin:
             # Try text first
             text = pb.stringForType_(NSPasteboardTypeString)
             if text:
-                self._session.write(normalize_text(str(text)).encode("utf-8"))
+                data = normalize_text(str(text)).encode("utf-8")
+                # Wrap in bracketed paste markers if the shell requested it (DEC 2004).
+                # Prevents paste injection — shell treats pasted text as literal input,
+                # not as typed commands that could auto-execute.
+                if self._session.buffer.bracketed_paste:
+                    data = b"\x1b[200~" + data + b"\x1b[201~"
+                self._session.write(data)
                 return
 
             # Try image — save to temp file, paste path (like iTerm2)
@@ -182,11 +188,14 @@ class TerminalViewInputMixin:
             if img_data is None:
                 img_data = pb.dataForType_(NSPasteboardTypeTIFF)
             if img_data and img_data.length() > 0:
-                import tempfile, os, atexit
-                fd, path = tempfile.mkstemp(suffix=".png", prefix="termikita-paste-")
+                import tempfile, os
+                # Use a dedicated temp directory for crash-safe cleanup.
+                # Even if atexit doesn't fire, macOS clears /tmp on reboot.
+                tmp_dir = os.path.join(tempfile.gettempdir(), "termikita-paste")
+                os.makedirs(tmp_dir, exist_ok=True)
+                fd, path = tempfile.mkstemp(suffix=".png", dir=tmp_dir)
                 os.write(fd, bytes(img_data))
                 os.close(fd)
-                atexit.register(lambda p=path: os.unlink(p) if os.path.exists(p) else None)
                 self._session.write(path.encode("utf-8"))
         except Exception:
             pass

@@ -63,10 +63,12 @@ class ConfigManager:
         self._data[key] = value
 
     def save(self) -> None:
-        """Persist current config to disk (atomic write to avoid corruption)."""
+        """Persist current config to disk (atomic write, owner-only permissions)."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = self._config_path.with_suffix(".tmp")
-        with open(tmp_path, "w") as f:
+        import os
+        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(self._data, f, indent=2)
         tmp_path.replace(self._config_path)
 
