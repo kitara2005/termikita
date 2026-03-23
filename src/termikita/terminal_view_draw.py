@@ -106,15 +106,26 @@ class TerminalViewDrawMixin:
         if len(self._prev_row_hashes) != total_rows:
             self._prev_row_hashes = [None] * total_rows
 
+        # Cursor position — needed to force-redraw cursor rows so cursor
+        # blink/movement properly erases the old cursor overlay.
+        cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
+        prev_cursor_row = getattr(self, "_prev_draw_cursor_row", -1)
+        at_bottom = self._session.buffer.is_at_bottom
+
         w = bounds.size.width
         for row_idx in range(first_row, last_row):
             cells = lines[row_idx]
-            # Hash row content — skip draw if unchanged since last frame.
+            # Hash all visual attributes — skip draw if unchanged since last frame.
             # The row retains its rendered pixels in the window backing store.
-            row_hash = hash(
-                tuple((c.char, c.fg, c.bg, c.bold, c.italic, c.reverse) for c in cells)
-            )
-            if self._prev_row_hashes[row_idx] == row_hash:
+            row_hash = hash(tuple(
+                (c.char, c.fg, c.bg, c.bold, c.italic, c.underline,
+                 c.reverse, c.strikethrough) for c in cells
+            ))
+            # Force redraw for cursor rows: cursor is drawn as overlay AFTER
+            # row content. Hash skip would leave stale cursor in backing store
+            # during blink toggle or cursor movement between rows.
+            is_cursor_row = (row_idx == cursor_row or row_idx == prev_cursor_row)
+            if self._prev_row_hashes[row_idx] == row_hash and not is_cursor_row:
                 continue
             self._prev_row_hashes[row_idx] = row_hash
             # Fill this row's full-width background before drawing content.
@@ -126,11 +137,11 @@ class TerminalViewDrawMixin:
                 context, row_y, cells, self._theme_colors, x_offset=px
             )
 
+        self._prev_draw_cursor_row = cursor_row
+
         # Draw cursor — respect DECTCEM strictly (matches iTerm2/Alacritty/Kitty).
         # TUI apps (Claude Code/Ink) hide terminal cursor and render their own
         # visual cursor as styled text characters. Don't draw over it.
-        cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
-        at_bottom = self._session.buffer.is_at_bottom
         if self._cursor_visible and cursor_visible and at_bottom:
             if first_row <= cursor_row < last_row:
                 cursor_color = resolve_color(

@@ -8,7 +8,7 @@ This matches the approach used by kitty, Alacritty, and iTerm2.
 Supported ranges:
 - Block Elements: U+2580–U+259F (▀▁▂▃▄▅▆▇█▉▊▋▌▍▎▏▐░▒▓)
 - Box Drawing: U+2500–U+257F (─│┌┐└┘├┤┬┴┼ etc.)
-- Geometric Shapes: ■ □ ◆ ◇ ▲ ▶ ▼ ◀ (common terminal UI symbols; ●○ use font glyphs)
+- Geometric Shapes: ● ○ ■ □ ◆ ◇ ▲ ▶ ▼ ◀ (common terminal UI symbols)
 """
 
 from __future__ import annotations
