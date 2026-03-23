@@ -1,22 +1,39 @@
 # Termikita
 
-A native macOS terminal emulator built with Python and AppKit. Renders text with CoreText for crisp, Retina-quality output — no Electron, no web views.
+A lightweight, native macOS terminal emulator built with Python and AppKit. Renders text with CoreText for crisp, Retina-quality output — no Electron, no web views, no GPU layers.
+
+Built for developers who use Claude Code, vim, and modern CLI tools daily.
 
 <p align="center">
   <img src="assets/icon.png" width="128" alt="Termikita icon">
 </p>
+
+## Why Termikita?
+
+Terminal.app is too basic — no themes, poor Nerd Font support, limited tab UX. iTerm2 is feature-rich but heavy. Termikita sits in between: lightweight, native rendering, and works great with modern TUI apps like Claude Code.
 
 ## Highlights
 
 - **Native macOS rendering** — CoreText + AppKit, same drawing path as Terminal.app
 - **Retina-sharp text** — subpixel positioning, no layer-backed blurring
 - **Full Unicode & Vietnamese IME** — NFC normalization, Telex/VNI input via NSTextInputClient
-- **256-color & 24-bit truecolor** — `TERM=xterm-256color`, `COLORTERM=truecolor`
-- **Multi-tab, multi-window** — independent sessions with per-tab PTY processes
-- **9 color themes** — Dracula, Nord, Solarized, Gruvbox, One Dark, Catppuccin Mocha, and more — switch from View menu
-- **Nerd Font support** — auto-detects installed Nerd Fonts, PUA glyph isolation
-- **Finder integration** — right-click "Open in Termikita", drag folders to dock icon, `termikita://` URL scheme
+- **24-bit truecolor** — correct colors for Claude Code, vim, bat, delta, lazygit
+- **9 color themes** — Dracula, Nord, Catppuccin Mocha, Gruvbox, One Dark, Solarized, and more
+- **Nerd Font auto-detection** — Powerline/devicons just work, no manual config
+- **Multi-tab, multi-window** — each tab runs its own PTY process
+- **Finder integration** — right-click "Open in Termikita", drag folders to dock icon
 - **Dock bounce & notifications** — alerts when long-running commands finish in background
+- **100K line scrollback** — smooth scrolling, stable viewport during streaming output
+
+## Works Great With
+
+| Tool | Status |
+|------|--------|
+| Claude Code | Tested daily — cursor, colors, spinners, IME all work correctly |
+| vim / neovim | Alternate screen, cursor shapes, 24-bit color |
+| tmux | Nested sessions, passthrough sequences |
+| lazygit / htop | Full TUI rendering |
+| bat / delta / fzf | Syntax highlighting, 256/truecolor |
 
 ---
 
@@ -31,7 +48,6 @@ Grab the latest DMG from [**Releases**](https://github.com/kitara2005/termikita/
 ### Build from source
 
 ```bash
-# Clone & setup
 git clone https://github.com/kitara2005/termikita.git
 cd termikita
 python3 -m venv .venv
@@ -56,7 +72,7 @@ bash build-dmg.sh             # → dist/Termikita.dmg
 
 ### Multi-Tab & Multi-Window
 
-Each tab runs its own shell process with a dedicated PTY. Tabs display titles from `OSC 2` escape sequences. Multiple windows supported with cascading placement.
+Each tab runs its own shell process with a dedicated PTY. Multiple windows supported with cascading placement.
 
 | Shortcut | Action |
 |---|---|
@@ -64,21 +80,18 @@ Each tab runs its own shell process with a dedicated PTY. Tabs display titles fr
 | `Cmd+N` | New window |
 | `Cmd+W` | Close tab |
 | `Cmd+1`–`9` | Switch to tab by number |
-| `Cmd+Shift+]` | Next tab |
-| `Cmd+Shift+[` | Previous tab |
+| `Cmd+Shift+]` / `[` | Next / previous tab |
 
 ### Text Rendering
 
 CoreText renders each line as grouped `CTLine` runs — the same API that powers TextEdit and Xcode. No layer-backed views means no scaling artifacts on Retina displays.
 
-- **Font variants:** bold, italic, bold-italic synthesized via NSFontManager
+- **Font variants:** bold, italic, bold-italic via NSFontManager
 - **Font cascade:** primary font → Nerd Font (auto-detected) → Lucida Grande → LastResort
 - **Block elements:** pixel-snapped box drawing and block art (█▄▀─│├┘)
-- **Decorations:** underline, strikethrough rendered at subpixel precision
+- **Decorations:** underline, strikethrough at subpixel precision
 
 ### Font Selection & Zoom
-
-Open the system font panel from **Format → Font → Show Fonts** or use keyboard shortcuts:
 
 | Shortcut | Action |
 |---|---|
@@ -86,110 +99,77 @@ Open the system font panel from **Format → Font → Show Fonts** or use keyboa
 | `Cmd+-` | Zoom out (-1pt) |
 | `Cmd+0` | Reset to default size |
 
-Font range: 8pt – 36pt. Changes persist across sessions.
+Font range: 8pt – 36pt. Changes persist across sessions. Open the system font panel from **Format → Font → Show Fonts**.
 
 ### Color Themes
 
-9 bundled themes. Switch instantly from **View → Theme** — active theme has a checkmark. Choice persists across sessions.
+9 bundled themes — switch from **View → Theme**:
 
 | Theme | Style |
 |---|---|
-| `default-dark` | Light gray on dark — the default |
+| `default-dark` | Light gray on dark (default) |
 | `default-light` | Dark text on light background |
-| `dracula` | Purple-accented dark theme |
-| `nord` | Arctic, blue-tinted palette |
-| `solarized-dark` | Ethan Schoonover's dark variant |
-| `solarized-light` | Ethan Schoonover's light variant |
-| `gruvbox-dark` | Retro warm dark theme |
+| `dracula` | Purple-accented dark |
+| `nord` | Arctic, blue-tinted |
+| `solarized-dark` / `light` | Ethan Schoonover's palette |
+| `gruvbox-dark` | Retro warm dark |
 | `one-dark` | Atom One Dark |
 | `catppuccin-mocha` | Pastel dark, warm tones |
 
-Custom themes: add a `.json` file to `themes/` when running from source. In built `.app` bundles, themes are inside `Resources/themes/`.
+Custom themes: add a `.json` file to `themes/` directory.
 
 ### Cursor
 
-Three cursor styles with blinking support:
-
-- **Block** — filled rectangle (default)
-- **Beam** — vertical I-beam
-- **Underline** — bottom line
-
-Cursor shape is controlled by applications via `DECSCUSR` escape sequences. Cursor visibility (`DECTCEM`) is strictly respected — TUI frameworks like Ink/Claude Code that hide the terminal cursor and render their own work correctly.
+Three cursor styles with blinking: **Block**, **Beam** (I-bar), **Underline**. Shape controlled by apps via `DECSCUSR`. Visibility (`DECTCEM`) strictly respected — TUI frameworks like Ink/Claude Code that render their own cursor work correctly.
 
 ### Terminal Emulation
 
 Full VT100/xterm emulation via [pyte](https://github.com/selectel/pyte):
 
-- **Colors:** 16 ANSI, 256 indexed, 24-bit RGB (`SGR 38;2;r;g;b`)
+- **Colors:** 16 ANSI, 256 indexed, 24-bit RGB
 - **Attributes:** bold, italic, underline, reverse video, strikethrough
 - **Alternate screen:** DECSET/DECRST 1049 with scrollback save/restore
-- **Terminal queries:** DA1 (device attributes), DSR (cursor position report)
-- **Hyperlinks:** OSC 8 stored per-cell
-- **Window title:** OSC 2 updates tab and window title
-- **Synchronized output:** DEC 2026 support
+- **Terminal queries:** DA1, DSR (cursor position)
+- **Hyperlinks:** OSC 8 per-cell
+- **Window title:** OSC 2
+- **Synchronized output:** DEC 2026
 
 ### Scrollback
 
-100,000 lines by default (configurable). Scrollback is frozen while alternate-screen apps (vim, less, htop) are active — no stale output mixed in.
+100,000 lines by default. Scrollback freezes during alternate-screen apps (vim, less, htop).
 
 - Mouse wheel scrolls history in normal mode
-- Mouse wheel sends arrow keys in alternate screen mode (vim/less navigation)
+- Mouse wheel sends arrow keys in alternate screen (vim/less navigation)
 - Scroll position stays stable when new output arrives
+- Snaps to bottom on keyboard input
 
 ### Copy, Paste & Selection
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+C` | Copy selection (or send interrupt if no selection) |
+| `Cmd+C` | Copy selection (or interrupt if no selection) |
 | `Cmd+V` | Paste from clipboard |
 | `Cmd+A` | Select all visible lines |
 | Mouse drag | Select text region |
 
-Pasting images from clipboard saves to a temp file and inserts the path — useful for quick file references.
-
-### Right-Click Context Menu
-
-- Copy / Paste / Select All
-- Clear Buffer
-- New Tab / Close Tab
+Image paste: saves to temp file and inserts the path.
 
 ### Finder Integration
 
-**Services menu** (right-click in Finder):
-- "New Termikita Tab Here" — opens tab at selected folder
-- "New Termikita Window Here" — opens window at selected folder
-
-**Drag & drop:** Drag a folder onto the Termikita dock icon to open a tab there.
-
-**URL scheme:**
-```bash
-open "termikita:///Users/me/projects/myapp"
-```
-
-**Command line:**
-```bash
-termikita --dir /path/to/folder
-# or simply:
-termikita /path/to/folder
-```
+- **Services menu** (right-click in Finder): "New Termikita Tab/Window Here"
+- **Drag & drop:** folders onto dock icon
+- **URL scheme:** `open "termikita:///path/to/folder"`
+- **Command line:** `termikita /path/to/folder`
 
 ### Background Notifications
 
-When Termikita is not the active app:
-
-- **Dock bounce** — continuous bounce until you click the icon
-- **macOS notification** — banner with "Command completed"
-
-Triggered by:
-- TUI app exits (Claude Code, vim, etc.) — most reliable signal
-- Shell output after prolonged silence (command likely finished)
-- BEL character (`\a`)
+When Termikita is in background: dock bounce + macOS notification when commands finish. Triggered by TUI app exit, shell output after silence, or BEL character.
 
 ---
 
 ## Configuration
 
-Settings are stored in `~/.config/termikita/config.json`:
+Settings stored in `~/.config/termikita/config.json`:
 
 ```json
 {
@@ -207,8 +187,8 @@ Settings are stored in `~/.config/termikita/config.json`:
 |---|---|---|
 | `font_family` | `"SF Mono"` | Monospace font name |
 | `font_size` | `13.0` | Font size in points (8–36) |
-| `theme` | `"default-dark"` | Theme name (see [Color Themes](#color-themes)) |
-| `scrollback_lines` | `100000` | Maximum scrollback buffer lines |
+| `theme` | `"default-dark"` | Theme name |
+| `scrollback_lines` | `100000` | Max scrollback buffer |
 | `window_width` | `800` | Initial window width (px) |
 | `window_height` | `500` | Initial window height (px) |
 | `shell` | `""` | Shell path; empty = `$SHELL` or `/bin/zsh` |
@@ -237,30 +217,26 @@ Settings are stored in `~/.config/termikita/config.json`:
 └─────────────────────────────────────────┘
 ```
 
-- **PTY read thread** feeds data into BufferManager (pyte). Main thread polls a dirty flag at 60 fps — no cross-thread ObjC calls.
-- **CoreText** renders each line as style-grouped CTLine runs. PUA characters (Nerd Font icons) are isolated into single-cell runs to prevent grid displacement.
-- **No `setWantsLayer_(True)`** — layer-backed views cause blurry text on Retina. Termikita draws directly like native Terminal.app.
+- **PTY read thread** feeds data into BufferManager (pyte). Main thread polls dirty flags at 60 fps.
+- **CoreText** renders lines as style-grouped CTLine runs. PUA characters isolated into single-cell runs.
+- **No `setWantsLayer_(True)`** — layer-backed views blur text on Retina. Termikita draws directly like Terminal.app.
 
 ---
 
 ## Environment Variables
 
-Termikita sets these for child processes:
-
 | Variable | Value |
 |---|---|
 | `TERM` | `xterm-256color` |
 | `COLORTERM` | `truecolor` |
-| `LANG` | `en_US.UTF-8` (if not already set) |
+| `LANG` | `en_US.UTF-8` (if not set) |
 | `PROMPT_EOL_MARK` | `""` (suppresses zsh `%`) |
 
 ---
 
 ## Nerd Fonts
 
-Termikita auto-detects installed Nerd Fonts via NSFontManager and adds them to the font cascade. If no Nerd Font is installed, PUA characters (U+E000–U+F8FF) fall back to LastResort.
-
-For full icon support:
+Auto-detects installed Nerd Fonts via NSFontManager. For full icon support:
 
 ```bash
 brew install font-symbols-only-nerd-font
@@ -268,61 +244,27 @@ brew install font-symbols-only-nerd-font
 
 ---
 
-## Vietnamese IME Note
+## Vietnamese IME
 
-Termikita fully supports Vietnamese input via Telex/VNI through the macOS `NSTextInputClient` protocol. However, when running CLI tools that use `/` prefixed commands (e.g. Claude Code slash commands), the IME may compose letters unintentionally — for example, typing `/commit` could produce `/cômmit`.
-
-**Workaround:** Press `Cmd+Space` to switch to the English input source before typing slash commands, then `Cmd+Space` again to switch back. This is a limitation of how macOS IME works at the OS level — the terminal cannot detect when an app inside it expects raw ASCII input.
+Full Telex/VNI support via `NSTextInputClient`. When using CLI tools with `/` commands (e.g. Claude Code), press `Cmd+Space` to switch to English input first — this is a macOS IME limitation.
 
 ---
 
 ## Development
 
 ```bash
-# Setup
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,build]"
-
-# Run from source
-python -m termikita
-
-# Lint
-ruff check src/
-
-# Type check
-mypy src/termikita/
-```
-
-### Project Structure
-
-```
-src/termikita/
-├── __main__.py              # Entry point
-├── app_delegate.py          # NSApplicationDelegate, menu bar, Services
-├── main_window.py           # NSWindow setup
-├── tab_controller.py        # Tab lifecycle, font zoom, dock bounce
-├── tab_bar_view.py          # Tab strip rendering
-├── terminal_view.py         # NSView subclass, ObjC selector forwarding
-├── terminal_view_draw.py    # drawRect_, refresh timer, scroll wheel
-├── terminal_view_input.py   # NSTextInputClient, mouse, clipboard, context menu
-├── terminal_session.py      # PTY + Buffer orchestrator
-├── pty_manager.py           # PTY fork/exec, I/O thread
-├── buffer_manager.py        # pyte Screen, scrollback, VT100 parsing
-├── text_renderer.py         # CoreText rendering, font metrics
-├── cell_draw_helpers.py     # CTLine drawing, block elements, decorations
-├── glyph_atlas.py           # LRU glyph cache with font fallback
-├── color_resolver.py        # ANSI → RGB resolution (256 + 24-bit)
-├── color_utils.py           # Hex/RGB conversion
-├── theme_manager.py         # Theme loading from JSON
-├── config_manager.py        # ~/.config/termikita/config.json
-├── input_handler.py         # Key code → escape sequence mapping
-├── unicode_utils.py         # NFC normalization
-├── constants.py             # App-wide defaults
-└── block_element_renderer.py # Box drawing & block art
+python -m termikita          # Run
+ruff check src/              # Lint
+mypy src/termikita/          # Type check
 ```
 
 ---
+
+## Contributing
+
+Issues, bug reports, and PRs are welcome at [github.com/kitara2005/termikita](https://github.com/kitara2005/termikita).
 
 ## License
 
