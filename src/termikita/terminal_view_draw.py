@@ -34,11 +34,6 @@ from termikita.constants import TERMINAL_PADDING_X, TERMINAL_PADDING_Y
 class TerminalViewDrawMixin:
     """Drawing, timers, resize, and scroll helpers for TerminalView."""
 
-    # Row content hashes from previous draw — skip unchanged rows in drawRect_.
-    # Reset to empty on full-redraw triggers (resize, scroll, theme change).
-    # Key fix: background fill is per-ROW (not full-rect), so skipped rows
-    # retain their rendered pixels from the previous frame instead of going blank.
-    _prev_row_hashes: list = []
 
     # ------------------------------------------------------------------
     # drawRect_ — partial redraw: only rows intersecting dirty rect
@@ -65,83 +60,30 @@ class TerminalViewDrawMixin:
         # Disable subpixel quantization for smoother glyph placement on Retina
         CGContextSetShouldSubpixelQuantizeFonts(cg_ctx, False)
 
-        # Background color for padding areas and changed rows
+        # Fill background only for the invalidated rect
         bg_rgb = self._theme_colors.get("background", (30, 30, 30))
-        bg_color = NSColor.colorWithSRGBRed_green_blue_alpha_(
+        NSColor.colorWithSRGBRed_green_blue_alpha_(
             bg_rgb[0] / 255.0, bg_rgb[1] / 255.0, bg_rgb[2] / 255.0, 1.0
-        )
+        ).setFill()
+        NSBezierPath.fillRect_(rect)
 
         # Determine which rows intersect with the dirty rect (accounting for padding)
         px, py = TERMINAL_PADDING_X, TERMINAL_PADDING_Y
         lines = self._session.buffer.get_visible_lines()
-        total_rows = len(lines)
         first_row = max(0, int((rect.origin.y - py) / ch))
-        last_row = min(total_rows, int((rect.origin.y - py + rect.size.height) / ch) + 1)
+        last_row = min(len(lines), int((rect.origin.y - py + rect.size.height) / ch) + 1)
 
-        # Fill padding areas (margins around the terminal grid) with background.
-        # Only fill what intersects the dirty rect to avoid overdraw.
-        bounds = self.bounds()
-        bg_color.setFill()
-        # Top padding
-        if rect.origin.y < py:
-            NSBezierPath.fillRect_(NSMakeRect(
-                rect.origin.x, rect.origin.y,
-                rect.size.width, min(py - rect.origin.y, rect.size.height),
-            ))
-        # Bottom padding (below last terminal row)
-        grid_bottom = py + total_rows * ch
-        if rect.origin.y + rect.size.height > grid_bottom:
-            NSBezierPath.fillRect_(NSMakeRect(
-                rect.origin.x, max(rect.origin.y, grid_bottom),
-                rect.size.width, rect.origin.y + rect.size.height - max(rect.origin.y, grid_bottom),
-            ))
-        # Left padding
-        if rect.origin.x < px:
-            NSBezierPath.fillRect_(NSMakeRect(
-                rect.origin.x, rect.origin.y,
-                min(px - rect.origin.x, rect.size.width), rect.size.height,
-            ))
-
-        # Grow/shrink hash list to match row count
-        if len(self._prev_row_hashes) != total_rows:
-            self._prev_row_hashes = [None] * total_rows
-
-        # Cursor position — needed to force-redraw cursor rows so cursor
-        # blink/movement properly erases the old cursor overlay.
-        cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
-        prev_cursor_row = getattr(self, "_prev_draw_cursor_row", -1)
-        at_bottom = self._session.buffer.is_at_bottom
-
-        w = bounds.size.width
         for row_idx in range(first_row, last_row):
             cells = lines[row_idx]
-            # Hash all visual attributes — skip draw if unchanged since last frame.
-            # The row retains its rendered pixels in the window backing store.
-            row_hash = hash(tuple(
-                (c.char, c.fg, c.bg, c.bold, c.italic, c.underline,
-                 c.reverse, c.strikethrough) for c in cells
-            ))
-            # Force redraw for cursor rows: cursor is drawn as overlay AFTER
-            # row content. Hash skip would leave stale cursor in backing store
-            # during blink toggle or cursor movement between rows.
-            is_cursor_row = (row_idx == cursor_row or row_idx == prev_cursor_row)
-            if self._prev_row_hashes[row_idx] == row_hash and not is_cursor_row:
-                continue
-            self._prev_row_hashes[row_idx] = row_hash
-            # Fill this row's full-width background before drawing content.
-            # Per-row fill (not full-rect) so skipped rows keep their pixels.
-            row_y = py + row_idx * ch
-            bg_color.setFill()
-            NSBezierPath.fillRect_(NSMakeRect(0, row_y, w, ch))
             self._renderer.draw_line(
-                context, row_y, cells, self._theme_colors, x_offset=px
+                context, py + row_idx * ch, cells, self._theme_colors, x_offset=px
             )
-
-        self._prev_draw_cursor_row = cursor_row
 
         # Draw cursor — respect DECTCEM strictly (matches iTerm2/Alacritty/Kitty).
         # TUI apps (Claude Code/Ink) hide terminal cursor and render their own
         # visual cursor as styled text characters. Don't draw over it.
+        cursor_row, cursor_col, cursor_visible = self._session.buffer.get_cursor()
+        at_bottom = self._session.buffer.is_at_bottom
         if self._cursor_visible and cursor_visible and at_bottom:
             if first_row <= cursor_row < last_row:
                 cursor_color = resolve_color(
@@ -215,8 +157,6 @@ class TerminalViewDrawMixin:
             self._session.buffer.scroll_up(max(1, int(delta * 3)))
         elif delta < 0:
             self._session.buffer.scroll_down(max(1, int(abs(delta) * 3)))
-        # Viewport content changed — reset row hash cache for full redraw
-        self._prev_row_hashes = []
         self.setNeedsDisplay_(True)
 
     # ------------------------------------------------------------------
@@ -271,8 +211,6 @@ class TerminalViewDrawMixin:
         py = TERMINAL_PADDING_Y
         h = self.bounds().size.height
         if dirty_rows is None:
-            # Full redraw — reset row hash cache so all rows are redrawn
-            self._prev_row_hashes = []
             self.setNeedsDisplay_(True)
             session.buffer.clear_dirty()
         elif dirty_rows or cursor_moved:
