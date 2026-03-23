@@ -41,7 +41,19 @@ class TerminalViewDrawMixin:
 
     def drawRect_(self, rect: object) -> None:
         context = NSGraphicsContext.currentContext()
-        if context is None or getattr(self, "_session", None) is None:
+        if context is None:
+            return
+
+        # Always fill background with theme color — even before session is ready.
+        # Without this, the view shows white/transparent default NSView background
+        # during app startup before the PTY session is initialized.
+        bg_rgb = self._theme_colors.get("background", (30, 30, 30))
+        NSColor.colorWithSRGBRed_green_blue_alpha_(
+            bg_rgb[0] / 255.0, bg_rgb[1] / 255.0, bg_rgb[2] / 255.0, 1.0
+        ).setFill()
+        NSBezierPath.fillRect_(rect)
+
+        if getattr(self, "_session", None) is None:
             return
 
         ch = self._renderer.cell_height
@@ -59,13 +71,6 @@ class TerminalViewDrawMixin:
         CGContextSetShouldSubpixelPositionFonts(cg_ctx, True)
         # Disable subpixel quantization for smoother glyph placement on Retina
         CGContextSetShouldSubpixelQuantizeFonts(cg_ctx, False)
-
-        # Fill background only for the invalidated rect
-        bg_rgb = self._theme_colors.get("background", (30, 30, 30))
-        NSColor.colorWithSRGBRed_green_blue_alpha_(
-            bg_rgb[0] / 255.0, bg_rgb[1] / 255.0, bg_rgb[2] / 255.0, 1.0
-        ).setFill()
-        NSBezierPath.fillRect_(rect)
 
         # Determine which rows intersect with the dirty rect (accounting for padding)
         px, py = TERMINAL_PADDING_X, TERMINAL_PADDING_Y
