@@ -267,6 +267,25 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         TerminalViewInputMixin.contextClearBuffer_(self, sender)
 
     # ------------------------------------------------------------------
+    # Edit menu actions (copy:/paste:/selectAll: from menu bar)
+    # ------------------------------------------------------------------
+
+    def copy_(self, sender: object) -> None:
+        """Edit → Copy: copy selection if any, otherwise send SIGINT (Ctrl+C)."""
+        if self._selection_start and self._selection_end:
+            self._copy_selection()
+        elif self._session:
+            self._session.write(b"\x03")
+
+    def paste_(self, sender: object) -> None:
+        """Edit → Paste: paste clipboard content to terminal."""
+        self._paste_clipboard()
+
+    def selectAll_(self, sender: object) -> None:
+        """Edit → Select All: select all visible text."""
+        self._select_all()
+
+    # ------------------------------------------------------------------
     # Keyboard input
     # ------------------------------------------------------------------
 

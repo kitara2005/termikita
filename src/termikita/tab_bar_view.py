@@ -275,11 +275,6 @@ class TabBarView(NSView):
         close_others.setTarget_(self)
         close_others.setEnabled_(len(self._controller.tabs) > 1)
 
-        menu.addItem_(NSMenuItem.separatorItem())
-
-        dup_tab = menu.addItemWithTitle_action_keyEquivalent_("Duplicate Tab", "contextDuplicateTab:", "")
-        dup_tab.setTarget_(self)
-
         return menu
 
     def contextNewTab_(self, sender: object) -> None:
@@ -299,10 +294,6 @@ class TabBarView(NSView):
             idx = self._context_menu_tab_index
             if 0 <= idx < len(self._controller.tabs):
                 self._controller.close_other_tabs(idx)
-
-    def contextDuplicateTab_(self, sender: object) -> None:
-        if self._controller:
-            self._controller.add_tab()
 
     # ------------------------------------------------------------------
     # Geometry helpers

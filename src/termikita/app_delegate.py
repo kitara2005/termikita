@@ -292,16 +292,11 @@ class AppDelegate(NSObject):
         main_menu.addItem_(shell_item)
 
         # Edit menu — clipboard + selection
+        # Delegate strips system-injected items (Writing Tools, AutoFill, etc.)
         edit_menu = NSMenu.alloc().initWithTitle_("Edit")
-        edit_menu.addItemWithTitle_action_keyEquivalent_(
-            "Copy", "copy:", "c"
-        )
-        edit_menu.addItemWithTitle_action_keyEquivalent_(
-            "Paste", "paste:", "v"
-        )
-        edit_menu.addItemWithTitle_action_keyEquivalent_(
-            "Select All", "selectAll:", "a"
-        )
+        edit_menu.setDelegate_(self)
+        self._edit_menu = edit_menu
+        self._populate_edit_menu(edit_menu)
         edit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Edit", None, ""
         )
@@ -400,6 +395,23 @@ class AppDelegate(NSObject):
     def zoomReset_(self, sender: object) -> None:
         """Cmd+0 — reset font size to default."""
         self._active_tab_ctrl().zoom_reset()
+
+    # ------------------------------------------------------------------
+    # Edit menu — strip system-injected items
+    # ------------------------------------------------------------------
+
+    def _populate_edit_menu(self, menu: object) -> None:
+        """Add only our Edit menu items (Copy, Paste, Select All)."""
+        menu.addItemWithTitle_action_keyEquivalent_("Copy", "copy:", "c")
+        menu.addItemWithTitle_action_keyEquivalent_("Paste", "paste:", "v")
+        menu.addItemWithTitle_action_keyEquivalent_("Select All", "selectAll:", "a")
+
+    def menuNeedsUpdate_(self, menu: object) -> None:
+        """Rebuild Edit menu to strip Writing Tools, AutoFill, Dictation, etc."""
+        if menu is not getattr(self, "_edit_menu", None):
+            return
+        menu.removeAllItems()
+        self._populate_edit_menu(menu)
 
     # ------------------------------------------------------------------
     # Theme picker
