@@ -237,7 +237,6 @@ class BufferManager:
 
         self._scroll_offset: int = 0
         self._synchronized: bool = False       # DEC 2026 batch mode
-        self._sync_end_time: float = 0.0       # monotonic time of last sync_end
         self._osc8_current_url: str | None = None
         self._cursor_style: str = "block"      # DECSCUSR cursor shape (default=block)
         self._cursor_hidden: bool = False      # Own DECTCEM tracking (don't rely on pyte)
@@ -274,8 +273,6 @@ class BufferManager:
             self._synchronized = True
         elif last_end > last_begin:
             self._synchronized = False
-            import time
-            self._sync_end_time = time.monotonic()
 
         # DECTCEM cursor show/hide — track LAST occurrence to get final state.
         # When both show+hide appear in same chunk (e.g. Claude Code rendering),
@@ -518,25 +515,8 @@ class BufferManager:
 
     @property
     def synchronized(self) -> bool:
-        """True while DEC 2026 synchronized output is active (suppress redraws).
-
-        Also returns True for a brief grace period (8ms) after sync_end.
-        TUI apps like Claude Code/Ink send rapid frame updates where the gap
-        between sync_end and the next sync_begin is just a few milliseconds.
-        Without the grace period, the refresh timer could render a frame that's
-        about to be immediately replaced, causing visible flicker on animated
-        elements (spinners, status indicators).
-        """
-        if self._synchronized:
-            return True
-        # Grace period: suppress render for 8ms after sync_end to coalesce
-        # back-to-back Ink frames. Only applies in alternate screen where
-        # TUI apps run; normal shell output renders immediately.
-        if self._sync_end_time > 0 and self._screen.in_alternate_screen:
-            import time
-            if time.monotonic() - self._sync_end_time < 0.008:
-                return True
-        return False
+        """True while DEC 2026 synchronized output is active (suppress redraws)."""
+        return self._synchronized
 
     @property
     def cursor(self) -> tuple[int, int]:

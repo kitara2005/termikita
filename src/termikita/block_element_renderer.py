@@ -1,19 +1,15 @@
-"""Custom geometric renderer for Unicode block elements, box drawing, and shapes.
+"""Custom geometric renderer for Unicode block elements and box drawing chars.
 
-Instead of rendering these as font glyphs (which leave gaps between cells or
-use wrong metrics from proportional fallback fonts), draws them as filled
-rectangles, circles, and paths for pixel-perfect rendering.
+Instead of rendering these as font glyphs (which leave gaps between cells),
+draws them as filled rectangles and line paths for pixel-perfect tiling.
 This matches the approach used by kitty, Alacritty, and iTerm2.
 
 Supported ranges:
 - Block Elements: U+2580–U+259F (▀▁▂▃▄▅▆▇█▉▊▋▌▍▎▏▐░▒▓)
 - Box Drawing: U+2500–U+257F (─│┌┐└┘├┤┬┴┼ etc.)
-- Geometric Shapes: ● ○ ■ □ ◆ ◇ ▲ ▶ ▼ ◀ (common terminal UI symbols)
 """
 
 from __future__ import annotations
-
-from termikita.geometric_shape_renderer import GEOMETRIC_SHAPES, draw_geometric
 
 # Block element character range
 _BLOCK_START = 0x2580
@@ -32,11 +28,7 @@ def is_drawable_element(ch: str) -> bool:
     if not ch or len(ch) != 1:
         return False
     cp = ord(ch)
-    return (
-        (_BLOCK_START <= cp <= _BLOCK_END)
-        or (_BOX_START <= cp <= _BOX_END)
-        or cp in GEOMETRIC_SHAPES
-    )
+    return (_BLOCK_START <= cp <= _BLOCK_END) or (_BOX_START <= cp <= _BOX_END)
 
 
 def draw_block_elements(
@@ -76,13 +68,6 @@ def draw_block_elements(
             fg.set()
             x = x_offset + i * cell_w
             _draw_box(cp, x, y, cell_w, cell_h)
-            drawn.add(i)
-
-        elif cp in GEOMETRIC_SHAPES:
-            fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
-            fg.set()
-            x = x_offset + i * cell_w
-            draw_geometric(cp, x, y, cell_w, cell_h)
             drawn.add(i)
 
     return drawn

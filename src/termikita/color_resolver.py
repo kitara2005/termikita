@@ -99,20 +99,6 @@ def _to_rgb(
             return ansi_palette[idx]
         return ansi_256_to_rgb(idx)
 
-    # 24-bit "R;G;B" format from pyte (SGR 38;2;R;G;B / SGR 48;2;R;G;B)
-    if ";" in color:
-        try:
-            parts = color.split(";")
-            if len(parts) == 3:
-                return (int(parts[0]), int(parts[1]), int(parts[2]))
-        except (ValueError, IndexError):
-            pass
-
-    # Numeric string from pyte 256-color (SGR 38;5;N) — some pyte versions
-    # store the index as a string instead of an integer
-    if color.isdigit():
-        return ansi_256_to_rgb(int(color))
-
     # Hex string fallback ("#RRGGBB" or "RRGGBB")
     if color.startswith("#") or (len(color) == 6 and all(c in "0123456789abcdefABCDEF" for c in color)):
         try:
