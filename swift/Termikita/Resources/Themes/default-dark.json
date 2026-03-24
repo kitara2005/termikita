@@ -1,0 +1,16 @@
+{
+    "name": "Default Dark",
+    "author": "Termikita",
+    "colors": {
+        "foreground": "#cccccc",
+        "background": "#1e1e1e",
+        "cursor": "#ffffff",
+        "selection": "#444444",
+        "ansi": [
+            "#000000", "#cc0000", "#00cc00", "#cccc00",
+            "#0000cc", "#cc00cc", "#00cccc", "#cccccc",
+            "#808080", "#ff0000", "#00ff00", "#ffff00",
+            "#0000ff", "#ff00ff", "#00ffff", "#ffffff"
+        ]
+    }
+}
