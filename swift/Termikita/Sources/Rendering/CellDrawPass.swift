@@ -42,8 +42,12 @@ final class CellDrawPass {
         // Pass 1: Backgrounds
         drawBackgrounds(lines: lines, cw: cw, ch: ch, px: paddingX, py: paddingY, selection: selection)
 
-        // Pass 2: Glyphs
-        drawGlyphs(lines: lines, cw: cw, ch: ch, px: paddingX, py: paddingY, baseline: baseline)
+        // Pass 1.5: Block elements (geometric rendering, skip in glyph pass)
+        var blockCells = Set<Int>() // encoded as row*10000+col
+        drawBlockElements(lines: lines, cw: cw, ch: ch, px: paddingX, py: paddingY, drawn: &blockCells)
+
+        // Pass 2: Glyphs (skip block element cells)
+        drawGlyphs(lines: lines, cw: cw, ch: ch, px: paddingX, py: paddingY, baseline: baseline, skip: blockCells)
 
         // Pass 3: Decorations (underline, strikethrough)
         drawDecorations(lines: lines, cw: cw, ch: ch, px: paddingX, py: paddingY)
@@ -139,20 +143,40 @@ final class CellDrawPass {
         }
     }
 
+    // MARK: - Pass 1.5: Block elements
+
+    private func drawBlockElements(
+        lines: [[Cell]], cw: CGFloat, ch: CGFloat,
+        px: CGFloat, py: CGFloat, drawn: inout Set<Int>
+    ) {
+        for (row, cells) in lines.enumerated() {
+            let y = py + CGFloat(row) * ch
+            for (col, cell) in cells.enumerated() {
+                guard BlockElementRenderer.isBlockOrBoxChar(cell.char) else { continue }
+                let x = px + CGFloat(col) * cw
+                let (fgColor, _) = ColorResolver.resolvePair(
+                    fg: cell.fg, bg: cell.bg, reverse: cell.reverse, theme: theme
+                )
+                BlockElementRenderer.draw(cell.char, in: NSRect(x: x, y: y, width: cw, height: ch), color: fgColor)
+                drawn.insert(row * 10000 + col)
+            }
+        }
+    }
+
     // MARK: - Pass 2: Glyphs
 
     private func drawGlyphs(
         lines: [[Cell]], cw: CGFloat, ch: CGFloat,
-        px: CGFloat, py: CGFloat, baseline: CGFloat
+        px: CGFloat, py: CGFloat, baseline: CGFloat, skip: Set<Int>
     ) {
         for (row, cells) in lines.enumerated() {
             let y = py + CGFloat(row) * ch
             for (col, cell) in cells.enumerated() {
                 guard cell.char != " " && !cell.placeholder else { continue }
+                guard !skip.contains(row * 10000 + col) else { continue }
 
                 let x = px + CGFloat(col) * cw
                 let entry = glyphAtlas.entry(for: cell)
-                // Draw at baseline position (flipped coordinates)
                 entry.attrString.draw(at: NSPoint(x: x, y: y + ch - baseline))
             }
         }
