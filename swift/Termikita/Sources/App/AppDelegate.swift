@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var themeMgr: ThemeManager!
     private var editMenu: NSMenu?
     private var themeMenu: NSMenu?
+    /// Flag: set true when an external handler (Services/odoc/URL) opens content.
+    private var externalOpenHandled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         config = ConfigManager()
@@ -30,14 +32,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         setupMenuBar()
-        tabController.addTab()
 
         mainWindow.show()
         NSApp.activate(ignoringOtherApps: true)
+
+        // Deferred default tab — give external handlers (odoc/URL) 0.5s to open their own
+        let startDir = parseStartDir()
+        if let dir = startDir {
+            tabController.addTab(workingDir: dir)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.openDefaultTabIfNeeded()
+            }
+        }
+    }
+
+    private func openDefaultTabIfNeeded() {
+        if !externalOpenHandled && tabController.tabs.isEmpty {
+            tabController.addTab()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    // MARK: - Open folder (Finder drag to dock, "open" command)
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: filename) else { return false }
+        var isDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: filename, isDirectory: &isDir)
+        if isDir.boolValue {
+            externalOpenHandled = true
+            tabController.addTab(workingDir: filename)
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
+        return false
+    }
+
+    // MARK: - URL scheme (termikita:///path/to/folder)
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "termikita" else { continue }
+            let path = url.path
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                externalOpenHandled = true
+                tabController.addTab(workingDir: path)
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - CLI argument parsing
+
+    private func parseStartDir() -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        for (i, arg) in args.dropFirst().enumerated() {
+            if arg == "--dir", i + 2 < args.count {
+                let path = args[i + 2]
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                    return path
+                }
+            }
+            // Also accept bare directory as first argument
+            if i == 0 {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: arg, isDirectory: &isDir), isDir.boolValue {
+                    return arg
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - Menu bar
