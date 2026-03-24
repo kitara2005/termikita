@@ -7,14 +7,19 @@
 
 import AppKit
 
-final class TerminalView: NSView {
+final class TerminalView: NSView, NSTextInputClient {
     // Core components
     private(set) var pty: PTYManager!
     private(set) var buffer: BufferManager!
-    private var renderer: TextRenderer!
+    private(set) var renderer: TextRenderer!
     private var drawPass: CellDrawPass!
     private var selection = SelectionManager()
     var themeColors = ThemeColors()
+
+    // IME (Input Method Editor) state
+    private var markedText: String?
+    private var _markedRange: NSRange = NSRange(location: NSNotFound, length: 0)
+    private var selectedIMERange: NSRange = NSRange(location: 0, length: 0)
 
     // Timers
     private var refreshTimer: Timer?
@@ -152,7 +157,7 @@ final class TerminalView: NSView {
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags
 
-        // Cmd+key shortcuts
+        // Cmd+key shortcuts — bypass IME
         if mods.contains(.command) {
             handleCmdShortcut(event)
             return
@@ -173,11 +178,30 @@ final class TerminalView: NSView {
 
         // Special keys (arrows, function keys, etc.)
         if let seq = KeyMap.escapeSequence(for: event.keyCode) {
+            // If IME is composing, handle backspace specially
+            if hasMarkedText() {
+                if event.keyCode == 0x33 { // Backspace during composition
+                    // Let IME shorten the marked text (e.g., "việ" + BS → "vi")
+                    inputContext?.handleEvent(event)
+                    return
+                }
+                // Other special keys: commit marked text, then send key
+                if let marked = markedText {
+                    let normalized = marked.precomposedStringWithCanonicalMapping
+                    if let data = normalized.data(using: .utf8) {
+                        pty.write(data)
+                    }
+                }
+                markedText = nil
+                _markedRange = NSRange(location: NSNotFound, length: 0)
+                inputContext?.discardMarkedText()
+            }
             pty.write(seq)
             return
         }
 
-        // Regular character input — route through input context for IME
+        // Route through NSTextInputContext for proper IME composition
+        // This is CRITICAL — using interpretKeyEvents would bypass IME lifecycle
         inputContext?.handleEvent(event)
     }
 
@@ -187,7 +211,7 @@ final class TerminalView: NSView {
 
     private func handleCmdShortcut(_ event: NSEvent) {
         guard let chars = event.charactersIgnoringModifiers, let key = chars.first else { return }
-        _ = event.modifierFlags.contains(.shift) // hasShift — used in Phase 07 for tab switching
+        let hasShift = event.modifierFlags.contains(.shift)
 
         switch key.lowercased().first {
         case "c":
@@ -203,6 +227,10 @@ final class TerminalView: NSView {
             needsDisplay = true
         case "k":
             pty.write(Data([0x0C])) // Clear (form feed)
+        case "]" where hasShift:
+            break // Phase 07: next tab
+        case "[" where hasShift:
+            break // Phase 07: prev tab
         default:
             break
         }
@@ -212,29 +240,93 @@ final class TerminalView: NSView {
         guard let text = SelectionManager.pasteboardText() else { return }
         let normalized = text.precomposedStringWithCanonicalMapping
         guard var data = normalized.data(using: .utf8) else { return }
-        // Wrap in bracketed paste if shell requested it
         if buffer.bracketedPaste {
             data = "\u{1b}[200~".data(using: .utf8)! + data + "\u{1b}[201~".data(using: .utf8)!
         }
         pty.write(data)
     }
 
-    // MARK: - NSTextInputClient (basic — full IME in Phase 06)
+    // MARK: - NSTextInputClient — full Vietnamese IME support
 
-    func insertText(_ insertString: Any, replacementRange: NSRange) {
+    /// IME commits final composed text (or regular key character input).
+    func insertText(_ string: Any, replacementRange: NSRange) {
         let text: String
-        if let attrStr = insertString as? NSAttributedString {
+        if let attrStr = string as? NSAttributedString {
             text = attrStr.string
-        } else if let str = insertString as? String {
+        } else if let str = string as? String {
             text = str
         } else { return }
 
+        markedText = nil
+        _markedRange = NSRange(location: NSNotFound, length: 0)
+
         let normalized = text.precomposedStringWithCanonicalMapping
-        if let data = normalized.data(using: .utf8) {
+        if let data = normalized.data(using: .utf8), !data.isEmpty {
             buffer.requestScrollToBottom()
             pty.write(data)
         }
         needsDisplay = true
+    }
+
+    /// Called while IME is composing — store marked text for overlay display.
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        if let attrStr = string as? NSAttributedString {
+            markedText = attrStr.string.isEmpty ? nil : attrStr.string
+        } else if let str = string as? String {
+            markedText = str.isEmpty ? nil : str
+        } else {
+            markedText = nil
+        }
+
+        if let marked = markedText {
+            _markedRange = NSRange(location: 0, length: marked.count)
+        } else {
+            _markedRange = NSRange(location: NSNotFound, length: 0)
+        }
+        selectedIMERange = selectedRange
+        needsDisplay = true
+    }
+
+    /// Cancel/commit any in-progress IME composition.
+    func unmarkText() {
+        markedText = nil
+        _markedRange = NSRange(location: NSNotFound, length: 0)
+        needsDisplay = true
+    }
+
+    func hasMarkedText() -> Bool {
+        markedText != nil
+    }
+
+    func markedRange() -> NSRange {
+        _markedRange
+    }
+
+    func selectedRange() -> NSRange {
+        selectedIMERange
+    }
+
+    /// Return screen rect for IME candidate window placement near cursor.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let (imeRow, imeCol) = buffer.findVisualCursorForIME()
+        let x = AppConstants.terminalPaddingX + CGFloat(imeCol) * renderer.cellWidth
+        let y = AppConstants.terminalPaddingY + CGFloat(imeRow) * renderer.cellHeight
+        let rect = NSRect(x: x, y: y, width: 0, height: renderer.cellHeight)
+        // Convert to screen coordinates
+        let windowRect = convert(rect, to: nil)
+        return window?.convertToScreen(windowRect) ?? rect
+    }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        nil
+    }
+
+    func characterIndex(for point: NSPoint) -> Int {
+        0
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
     }
 
     // MARK: - Mouse events
