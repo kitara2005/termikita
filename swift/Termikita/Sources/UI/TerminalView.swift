@@ -349,6 +349,52 @@ final class TerminalView: NSView, NSTextInputClient {
         needsDisplay = true
     }
 
+    // MARK: - Context menu (right-click)
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let copyItem = menu.addItem(withTitle: "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = selection.hasSelection
+
+        let pasteItem = menu.addItem(withTitle: "Paste", action: #selector(contextPaste(_:)), keyEquivalent: "")
+        pasteItem.target = self
+
+        let selAllItem = menu.addItem(withTitle: "Select All", action: #selector(contextSelectAll(_:)), keyEquivalent: "")
+        selAllItem.target = self
+
+        menu.addItem(.separator())
+
+        let clearItem = menu.addItem(withTitle: "Clear Buffer", action: #selector(contextClearBuffer(_:)), keyEquivalent: "")
+        clearItem.target = self
+
+        menu.addItem(.separator())
+
+        // Tab actions via app delegate
+        let newTabItem = menu.addItem(withTitle: "New Tab", action: #selector(AppDelegate.newTab(_:)), keyEquivalent: "")
+        newTabItem.target = NSApp.delegate
+        let closeTabItem = menu.addItem(withTitle: "Close Tab", action: #selector(AppDelegate.closeTab(_:)), keyEquivalent: "")
+        closeTabItem.target = NSApp.delegate
+
+        return menu
+    }
+
+    @objc private func contextCopy(_ sender: Any?) {
+        selection.copySelection(from: buffer.getVisibleLines())
+    }
+    @objc private func contextPaste(_ sender: Any?) {
+        pasteClipboard()
+    }
+    @objc private func contextSelectAll(_ sender: Any?) {
+        selection.selectAll(lineCount: buffer.rows, colCount: buffer.cols)
+        needsDisplay = true
+    }
+    @objc private func contextClearBuffer(_ sender: Any?) {
+        pty.write("\u{1b}[2J\u{1b}[H".data(using: .utf8)!)
+    }
+
     private func cellPosition(from event: NSEvent) -> (Int, Int) {
         let point = convert(event.locationInWindow, from: nil)
         let col = max(0, Int((point.x - AppConstants.terminalPaddingX) / renderer.cellWidth))
