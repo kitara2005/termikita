@@ -7,7 +7,7 @@ final class MainWindow {
     /// Content area below the tab bar where TerminalView is placed.
     let contentView: NSView
     /// Tab bar strip at the top of the window.
-    let tabBarView: NSView
+    let tabBar: TabBarView
 
     init(width: CGFloat = AppConstants.defaultWindowWidth,
          height: CGFloat = AppConstants.defaultWindowHeight) {
@@ -34,19 +34,11 @@ final class MainWindow {
 
         // Tab bar at the top (fixed height)
         let tabBarHeight = AppConstants.tabBarHeight
-        let tabBar = NSView(frame: NSRect(
-            x: 0,
-            y: height - tabBarHeight,
-            width: width,
-            height: tabBarHeight
-        ))
+        let tabBarFrame = NSRect(x: 0, y: height - tabBarHeight, width: width, height: tabBarHeight)
+        let tabBar = TabBarView(frame: tabBarFrame)
         tabBar.autoresizingMask = [.width, .minYMargin]
-        tabBar.wantsLayer = true
-        tabBar.layer?.backgroundColor = NSColor(
-            calibratedRed: 28/255, green: 28/255, blue: 28/255, alpha: 1
-        ).cgColor
         rootView.addSubview(tabBar)
-        self.tabBarView = tabBar
+        self.tabBar = tabBar
 
         // Content view below the tab bar (fills remaining space)
         let content = NSView(frame: NSRect(

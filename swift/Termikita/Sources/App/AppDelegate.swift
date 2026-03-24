@@ -1,39 +1,37 @@
 /// NSApplicationDelegate for Termikita — bootstraps the app on launch.
 ///
-/// Creates the main window, spawns a terminal view with a shell,
-/// and builds the menu bar.
+/// Creates MainWindow + TabController, spawns the first tab,
+/// and builds the menu bar with tab management shortcuts.
 
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: MainWindow!
-    private var terminalView: TerminalView!
+    private var tabController: TabController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         mainWindow = MainWindow()
+
+        tabController = TabController(
+            contentView: mainWindow.contentView,
+            tabBarView: mainWindow.tabBar,
+            theme: ThemeColors()
+        )
+        tabController.onLastTabClosed = { [weak self] in
+            self?.mainWindow.window.close()
+        }
+
         setupMenuBar()
 
-        // Create terminal view filling the content area
-        let contentView = mainWindow.contentView
-        terminalView = TerminalView(frame: contentView.bounds)
-        terminalView.autoresizingMask = [.width, .height]
-        contentView.addSubview(terminalView)
-
-        // Spawn shell
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        terminalView.pty.spawn(workingDir: homeDir)
+        // Open first tab
+        tabController.addTab()
 
         mainWindow.show()
-        mainWindow.window.makeFirstResponder(terminalView)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        terminalView?.pty?.shutdown()
     }
 
     // MARK: - Menu bar
@@ -54,7 +52,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
-        // Edit menu (Copy/Paste/Select All)
+        // Shell menu
+        let shellMenu = NSMenu(title: "Shell")
+        shellMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
+        shellMenu.addItem(.separator())
+        shellMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab(_:)), keyEquivalent: "w")
+        let shellItem = NSMenuItem()
+        shellItem.submenu = shellMenu
+        mainMenu.addItem(shellItem)
+
+        // Edit menu
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "v")
@@ -63,20 +70,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
 
+        // View menu
+        let viewMenu = NSMenu(title: "View")
+        viewMenu.addItem(withTitle: "Bigger", action: #selector(zoomIn(_:)), keyEquivalent: "=")
+        viewMenu.addItem(withTitle: "Smaller", action: #selector(zoomOut(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Default Size", action: #selector(zoomReset(_:)), keyEquivalent: "0")
+        let viewItem = NSMenuItem()
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
+
+        // Window menu
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
         NSApp.mainMenu = mainMenu
     }
 
-    // MARK: - Edit menu actions (forwarded to terminal view)
+    // MARK: - Actions
 
-    @objc func copy(_ sender: Any?) {
-        // Handled by TerminalView keyDown Cmd+C
-    }
+    @objc func newTab(_ sender: Any?) { tabController.addTab() }
+    @objc func closeTab(_ sender: Any?) { tabController.closeTab(at: tabController.activeTabIndex) }
+    @objc func zoomIn(_ sender: Any?) { tabController.zoomIn() }
+    @objc func zoomOut(_ sender: Any?) { tabController.zoomOut() }
+    @objc func zoomReset(_ sender: Any?) { tabController.zoomReset() }
 
-    @objc func paste(_ sender: Any?) {
-        // Handled by TerminalView keyDown Cmd+V
-    }
-
-    @objc func selectAll(_ sender: Any?) {
-        // Handled by TerminalView keyDown Cmd+A
-    }
+    // Edit actions — handled by TerminalView via keyDown, but menu needs responders
+    @objc func copy(_ sender: Any?) {}
+    @objc func paste(_ sender: Any?) {}
+    @objc func selectAll(_ sender: Any?) {}
 }
