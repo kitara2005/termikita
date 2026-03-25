@@ -24,7 +24,7 @@ Terminal.app is too basic. iTerm2 is too heavy. Termikita is in between — nati
 
 Download DMG from [**Releases**](https://github.com/kitara2005/termikita/releases/latest), drag to Applications.
 
-### Build from source (Python)
+### Build from source
 
 ```bash
 git clone https://github.com/kitara2005/termikita.git
@@ -42,15 +42,7 @@ python setup.py py2app          # → dist/Termikita.app
 bash build-dmg.sh               # → dist/Termikita.dmg
 ```
 
-### Build from source (Swift — experimental)
-
-```bash
-cd swift/Termikita
-swift build                     # → .build/debug/Termikita
-swift run                       # Launch directly
-```
-
-**Requires:** macOS 13+ (Ventura). Python version needs Python 3.12+. Swift version needs Swift 5.9+.
+**Requires:** macOS 13+ (Ventura), Python 3.12+
 
 ## Keyboard Shortcuts
 
