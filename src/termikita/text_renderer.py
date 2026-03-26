@@ -106,7 +106,10 @@ class TextRenderer:
             return
         draw_backgrounds(cells, y, self.cell_width, self.cell_height, theme_colors, x_offset)
         draw_glyphs(cells, y, self.cell_width, self.baseline_offset, self._fonts, theme_colors, x_offset, cell_h=self.cell_height)
-        draw_decorations(cells, y, self.cell_width, self.cell_height, self.baseline_offset, theme_colors, x_offset)
+        # Decorations disabled: pyte incorrectly inherits underline attribute
+        # from TUI apps (Claude Code), causing spurious underlines on all text.
+        # TODO: fix pyte underline tracking, then re-enable decorations.
+        # draw_decorations(cells, y, self.cell_width, self.cell_height, self.baseline_offset, theme_colors, x_offset)
 
     def draw_cursor(
         self,

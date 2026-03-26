@@ -465,6 +465,12 @@ def draw_decorations(
         for i, cell in enumerate(cells):
             if not (cell.underline or cell.strikethrough):
                 continue
+            # Skip decorations for block/box drawing chars — they're geometric
+            # shapes, not text. Pyte may incorrectly inherit underline from
+            # adjacent styled text (Claude Code uses underline for headings).
+            ch = cell.char
+            if ch and len(ch) == 1 and 0x2500 <= ord(ch) <= 0x259F:
+                continue
             fg, _ = resolve_cell_colors(cell.fg, cell.bg, cell.reverse, theme)
             fg.set()
             x = x_offset + i * cell_w
