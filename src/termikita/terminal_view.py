@@ -292,7 +292,9 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
     def keyDown_(self, event: object) -> None:
         modifiers = event.modifierFlags()
         if modifiers & NSEventModifierFlagCommand:
-            self._handle_cmd_shortcut(event)
+            if self._handle_cmd_shortcut(event):
+                return
+            # Unhandled Cmd shortcuts: let menu bar handle (New Tab, Close Tab, etc.)
             return
         # Scroll-to-bottom-on-input (WezTerm behavior): when user types while
         # scrolled up, snap to bottom so they can see their input. Uses thread-safe
@@ -367,10 +369,11 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
         # NSFontPanelFaceModeMask | NSFontPanelSizeModeMask | NSFontPanelCollectionModeMask
         return 0x1 | 0x2 | 0x4
 
-    def _handle_cmd_shortcut(self, event: object) -> None:
+    def _handle_cmd_shortcut(self, event: object) -> bool:
+        """Handle Cmd shortcuts locally. Returns True if handled."""
         chars = event.charactersIgnoringModifiers()
         if not chars:
-            return
+            return False
         key = chars[0].lower()
         mods = event.modifierFlags()
         has_shift = bool(mods & NSEventModifierFlagShift)
@@ -391,6 +394,9 @@ class TerminalView(NSView, TerminalViewDrawMixin, TerminalViewInputMixin, protoc
             self._dispatch_tab_action("prev_tab")
         elif key.isdigit() and "1" <= key <= "9":
             self._dispatch_tab_action("select_tab", int(key) - 1)
+        else:
+            return False  # Not handled — let menu bar process it
+        return True
 
     def _dispatch_tab_action(self, action: str, arg: object = None) -> None:
         """Forward tab actions to TabController via responder chain."""
