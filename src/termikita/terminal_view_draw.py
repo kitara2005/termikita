@@ -192,6 +192,15 @@ class TerminalViewDrawMixin:
         if not session or session.buffer.synchronized:
             return
 
+        # Skip redraws while the window is minimized in the Dock. Otherwise the
+        # backing store is continuously marked dirty, AppKit fights to refresh
+        # the Dock thumbnail, and click-to-restore on the Dock icon can be
+        # dropped intermittently. PTY output still accumulates in the pyte
+        # buffer; on deminiaturize the next tick redraws the full view.
+        window = self.window()
+        if window is not None and window.isMiniaturized():
+            return
+
         ch = self._renderer.cell_height
         w = self.bounds().size.width
 
@@ -236,6 +245,11 @@ class TerminalViewDrawMixin:
 
     def blinkCursor_(self, timer: object) -> None:
         """Toggle cursor visibility — invalidate only the cursor cell."""
+        # Skip while minimized — same rationale as refreshDisplay_: avoid
+        # dirtying the backing store so the Dock thumbnail stays clickable.
+        window = self.window()
+        if window is not None and window.isMiniaturized():
+            return
         self._cursor_visible = not self._cursor_visible
         session = getattr(self, "_session", None)
         if not session:
